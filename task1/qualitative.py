@@ -127,6 +127,9 @@ def run_qualitative_generation(
     for cond in conditions:
         print(f"\n--- Generating Qualitative Responses for [{cond}] ---")
         model = load_evaluation_model(cond, base_model_path, ckpt_dir, device)
+        if model is None:
+            print(f"Skipping qualitative generation for [{cond}]: checkpoint not found.", flush=True)
+            continue
 
         for p in prompts:
             # Build messages

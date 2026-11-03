@@ -28,6 +28,20 @@ class MetaMathDataset(Dataset):
     def __getitem__(self, idx):
         return self.examples[idx]
 
+def load_gsm8k_dataset(split: str = "test"):
+    """Loads GSM8K dataset using namespaced ID with fallback."""
+    try:
+        return load_dataset("openai/gsm8k", "main", split=split)
+    except Exception:
+        return load_dataset("gsm8k", "main", split=split)
+
+def load_hellaswag_dataset(split: str = "validation"):
+    """Loads HellaSwag dataset using namespaced ID with fallback."""
+    try:
+        return load_dataset("Rowan/hellaswag", split=split)
+    except Exception:
+        return load_dataset("hellaswag", split=split)
+
 def prepare_metamath_40k(
     tokenizer: PreTrainedTokenizerBase,
     cache_path: str = "data/metamath_40k_tokenized.pt",
@@ -40,17 +54,17 @@ def prepare_metamath_40k(
     """
     cache_path = Path(cache_path)
     if cache_path.exists():
-        print(f"Loading cached MetaMathQA 40k dataset from {cache_path}...")
+        print(f"Loading cached MetaMathQA 40k dataset from {cache_path}...", flush=True)
         return torch.load(cache_path, weights_only=False)
 
-    print("Fetching GSM8K test split for contamination filtering...")
-    gsm8k_test = load_dataset("gsm8k", "main", split="test")
+    print("Fetching GSM8K test split for contamination filtering...", flush=True)
+    gsm8k_test = load_gsm8k_dataset(split="test")
     gsm8k_norm_questions = set()
     for item in gsm8k_test:
         norm_q = normalize_text_for_contamination(item["question"])
         if norm_q:
             gsm8k_norm_questions.add(norm_q)
-    print(f"Loaded {len(gsm8k_norm_questions)} unique normalized GSM8K test questions.")
+    print(f"Loaded {len(gsm8k_norm_questions)} unique normalized GSM8K test questions.", flush=True)
 
     print("Streaming / loading MetaMathQA...")
     metamath = load_dataset("meta-math/MetaMathQA", split="train")
@@ -194,8 +208,8 @@ def sample_activation_probe_set(
             return json.load(f)
 
     set_seed(seed)
-    print("Sampling 32 GSM8K test questions for activation probe...")
-    gsm8k = load_dataset("gsm8k", "main", split="test")
+    print("Sampling 32 GSM8K test questions for activation probe...", flush=True)
+    gsm8k = load_gsm8k_dataset(split="test")
     gsm8k_indices = sorted(list(range(len(gsm8k))))
     import random
     rng = random.Random(seed)
@@ -205,20 +219,21 @@ def sample_activation_probe_set(
         for idx in selected_gsm8k_idx
     ]
 
-    print("Sampling 32 HellaSwag validation contexts for activation probe...")
-    hellaswag = load_dataset("hellaswag", split="validation")
+    print("Sampling 32 HellaSwag validation contexts for activation probe...", flush=True)
+    hellaswag = load_hellaswag_dataset(split="validation")
     hellaswag_indices = sorted(list(range(len(hellaswag))))
     selected_hella_idx = rng.sample(hellaswag_indices, 32)
-    hella_samples = [
-        {
+    hella_samples = []
+    for idx in selected_hella_idx:
+        item = hellaswag[idx]
+        ctx = item.get("ctx") or f"{item.get('ctx_a', '')} {item.get('ctx_b', '')}".strip()
+        hella_samples.append({
             "id": idx,
-            "ctx": hellaswag[idx]["ctx"],
-            "activity_label": hellaswag[idx].get("activity_label", ""),
-            "endings": hellaswag[idx]["endings"],
-            "label": hellaswag[idx]["label"]
-        }
-        for idx in selected_hella_idx
-    ]
+            "ctx": ctx,
+            "activity_label": item.get("activity_label", ""),
+            "endings": item.get("endings", []),
+            "label": item.get("label", 0)
+        })
 
     probe_set = {
         "seed": seed,

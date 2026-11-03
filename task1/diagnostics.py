@@ -145,6 +145,16 @@ def compute_activation_diagnostics(
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
+    probe_file = Path(probe_set_path)
+    if not probe_file.exists():
+        print(f"Probe set file not found at {probe_set_path}. Sampling now...", flush=True)
+        from task1.data import sample_activation_probe_set
+        sample_activation_probe_set(save_path=probe_set_path)
+
+    if not probe_file.exists():
+        print(f"Warning: Could not create probe set at {probe_set_path}. Skipping activation diagnostics.", flush=True)
+        return {}
+
     probe_data = load_json(probe_set_path)
     math_probes = probe_data["gsm8k_math_probes"]
     nonmath_probes = probe_data["hellaswag_nonmath_probes"]

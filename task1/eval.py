@@ -138,6 +138,9 @@ def load_evaluation_model(
 
     elif condition == "full_ft_midpoint":
         ckpt_path = ckpt_base / "full_ft" / "checkpoint_step_625.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         print(f"Loading Full FT Midpoint from {ckpt_path}...")
         model = AutoModelForCausalLM.from_pretrained(
             base_model_path,
@@ -146,12 +149,15 @@ def load_evaluation_model(
         )
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
-        model.to(device)
+        model = model.to(dtype=torch.float16, device=device)
         model.eval()
         return model
 
     elif condition == "full_ft_final":
         ckpt_path = ckpt_base / "full_ft" / "checkpoint_step_1250.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         print(f"Loading Full FT Final from {ckpt_path}...")
         model = AutoModelForCausalLM.from_pretrained(
             base_model_path,
@@ -160,12 +166,15 @@ def load_evaluation_model(
         )
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
-        model.to(device)
+        model = model.to(dtype=torch.float16, device=device)
         model.eval()
         return model
 
     elif condition == "full_ft_l2sp_final":
         ckpt_path = ckpt_base / "full_ft_l2sp" / "checkpoint_step_1250.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         print(f"Loading Full FT + L2-SP Final from {ckpt_path}...")
         model = AutoModelForCausalLM.from_pretrained(
             base_model_path,
@@ -174,24 +183,33 @@ def load_evaluation_model(
         )
         ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model_state_dict"])
-        model.to(device)
+        model = model.to(dtype=torch.float16, device=device)
         model.eval()
         return model
 
     elif condition == "lora_4_final":
         ckpt_path = ckpt_base / "lora_4" / "checkpoint_step_1250.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         return verify_and_merge_adapter_model(
             base_model_path, str(ckpt_path), "lora_4", lora_r=4, lora_alpha=8.0, device=device
         )
 
     elif condition == "lora_16_final":
         ckpt_path = ckpt_base / "lora_16" / "checkpoint_step_1250.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         return verify_and_merge_adapter_model(
             base_model_path, str(ckpt_path), "lora_16", lora_r=16, lora_alpha=32.0, device=device
         )
 
     elif condition == "oplora_16_final":
         ckpt_path = ckpt_base / "oplora_16" / "checkpoint_step_1250.pt"
+        if not ckpt_path.exists():
+            print(f"Notice: Checkpoint for [{condition}] not found at {ckpt_path}. Skipping.")
+            return None
         return verify_and_merge_adapter_model(
             base_model_path, str(ckpt_path), "oplora_16", lora_r=16, lora_alpha=32.0, oplora_k=128, device=device
         )
@@ -229,6 +247,9 @@ def evaluate_condition_benchmarks(
 
     # Load condition model in FP16
     model = load_evaluation_model(condition, base_model_path, ckpt_dir, device)
+    if model is None:
+        print(f"Skipping evaluation for [{condition}] because checkpoint is missing.", flush=True)
+        return {}
 
     # Wrap model with lm-eval HFLM
     hflm = HFLM(
