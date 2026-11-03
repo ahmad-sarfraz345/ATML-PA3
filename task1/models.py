@@ -1,3 +1,4 @@
+from __future__ import annotations
 import math
 import time
 import torch
@@ -249,3 +250,4 @@ def apply_oplora_to_model(
           f"Total SVD preprocessing: {overhead_stats['total_svd_preprocessing_time_sec']:.2f}s, "
           f"Basis storage: {overhead_stats['total_basis_storage_mb']:.2f} MB.")
     return replaced_modules, overhead_stats
+

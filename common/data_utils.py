@@ -1,3 +1,4 @@
+from __future__ import annotations
 import re
 import string
 
@@ -38,3 +39,4 @@ def format_chat_prompt(tokenizer, question: str, response: str = None, enable_th
             add_generation_prompt=True,
             enable_thinking=enable_thinking
         ) if hasattr(tokenizer, "apply_chat_template") else f"<|im_start|>user\n{question}<|im_end|>\n<|im_start|>assistant\n"
+

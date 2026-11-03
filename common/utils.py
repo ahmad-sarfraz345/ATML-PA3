@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import random
 import time
@@ -5,7 +6,7 @@ import json
 import torch
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 
 def set_seed(seed: int = 6304):
     """
@@ -94,3 +95,4 @@ def load_jsonl(path: str | Path) -> list[Dict[str, Any]]:
             if line.strip():
                 records.append(json.loads(line.strip()))
     return records
+

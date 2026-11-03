@@ -1,9 +1,10 @@
+from __future__ import annotations
 import os
 import json
 import matplotlib.pyplot as plt
 import pandas as pd
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional, Tuple
 from common.utils import load_json, save_json
 
 CONDITIONS = [
@@ -184,3 +185,4 @@ def generate_resource_comparison_table(
             f.write(df.to_markdown(index=False))
         print(f"Generated resource usage summary at {out_json} and {out_md}")
     return rows
+

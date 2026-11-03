@@ -1,9 +1,10 @@
+from __future__ import annotations
 import os
 import json
 import yaml
 import re
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import torch
 from transformers import AutoTokenizer
 from common.utils import get_device, save_json, load_json
@@ -201,3 +202,4 @@ def run_qualitative_generation(
     print(f"Saved 42 annotated responses subset to {out_42_path}")
 
     return all_168_responses, annotation_42
+

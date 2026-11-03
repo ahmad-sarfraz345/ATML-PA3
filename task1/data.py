@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import json
 from pathlib import Path
@@ -228,3 +229,4 @@ def sample_activation_probe_set(
     save_json(probe_set, save_path)
     print(f"Saved activation probe set to {save_path}")
     return probe_set
+

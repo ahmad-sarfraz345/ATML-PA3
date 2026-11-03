@@ -1,10 +1,11 @@
+from __future__ import annotations
 import os
 import sys
 import copy
 import json
 import torch
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import lm_eval
 from lm_eval.models.huggingface import HFLM
@@ -45,34 +46,52 @@ def verify_and_merge_adapter_model(
     unmerged_model.to(device)
     unmerged_model.eval()
 
-    # 2. Load fresh backbone for merged model
+    # Small synthetic verification batch for unmerged logits
+    test_input_ids = torch.randint(0, 1000, (2, 32), device=device)
+    with torch.no_grad():
+        out_unmerged = unmerged_model(test_input_ids).logits
+
+    # 2. In-place merge adapters into base layers: W0 <- W0 + delta_W
+    for name, module in unmerged_model.named_modules():
+        if hasattr(module, "merge_into_base"):
+            module.merge_into_base()
+
+    # 3. Clean state dict to map back to standard CausalLM architecture
+    # e.g., 'model.layers.0.mlp.down_proj.base_layer.weight' -> 'model.layers.0.mlp.down_proj.weight'
+    cleaned_state_dict = {}
+    for k, v in unmerged_model.state_dict().items():
+        if any(k.endswith(suffix) for suffix in [".lora_A", ".lora_B", ".U_k", ".V_k"]):
+            continue
+        new_key = k.replace(".base_layer", "")
+        cleaned_state_dict[new_key] = v
+
+    # 4. Load fresh backbone for merged model and load merged weights
     merged_model = AutoModelForCausalLM.from_pretrained(
         model_name_or_path,
         torch_dtype=torch.float16,
         trust_remote_code=True
     )
-    merged_model.load_state_dict(unmerged_model.state_dict(), strict=False)
-
-    # Apply manual weight delta addition to fresh backbone
-    # For each adapter layer, W <- W + delta_W
-    for name, module in unmerged_model.named_modules():
-        if hasattr(module, "get_delta_weight"):
-            delta = module.get_delta_weight().to(torch.float16).to(device)
-            target_linear = dict(merged_model.named_modules())[f"{name}.base_layer"] if f"{name}.base_layer" in dict(merged_model.named_modules()) else None
-            if target_linear is None:
-                # Direct name mapping
-                target_linear = dict(merged_model.named_modules())[name]
-            target_linear.weight.data.add_(delta)
-
+    merged_model.load_state_dict(cleaned_state_dict, strict=True)
     merged_model.to(device)
     merged_model.eval()
 
-    # 3. Check merged vs unmerged logits on a small synthetic verification batch
-    test_input_ids = torch.randint(0, 1000, (2, 32), device=device)
+    # 5. Check merged vs unmerged logits on verification batch
     with torch.no_grad():
-        out_unmerged = unmerged_model(test_input_ids).logits
         out_merged = merged_model(test_input_ids).logits
         max_abs_diff = torch.max(torch.abs(out_unmerged - out_merged)).item()
+
+    print(f"Logits check for [{variant_name}]: max |logits_unmerged - logits_merged| = {max_abs_diff:.6e}")
+    if max_abs_diff > 1e-2:
+        print(f"WARNING: Logits discrepancy ({max_abs_diff}) higher than expected!")
+    else:
+        print("Merged vs unmerged logits verification PASSED.")
+
+    # Free unmerged model from GPU
+    del unmerged_model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    return merged_model
 
     print(f"Logits check for [{variant_name}]: max |logits_unmerged - logits_merged| = {max_abs_diff:.6e}")
     if max_abs_diff > 1e-2:
@@ -257,3 +276,4 @@ def evaluate_condition_benchmarks(
         torch.cuda.empty_cache()
 
     return summary_metrics
+

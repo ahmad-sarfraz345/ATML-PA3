@@ -1,20 +1,11 @@
+from __future__ import annotations
 import argparse
 import sys
+import os
 import torch
 from pathlib import Path
-from transformers import AutoTokenizer
 
 from common.utils import set_seed, get_device
-from task1.data import prepare_metamath_40k, get_dataloader, sample_activation_probe_set
-from task1.trainer import Task1Trainer
-from task1.eval import evaluate_condition_benchmarks
-from task1.diagnostics import compute_weight_space_diagnostics, compute_activation_diagnostics
-from task1.qualitative import run_qualitative_generation
-from task1.analysis import (
-    generate_benchmark_summary_table,
-    plot_combined_learning_curves,
-    generate_resource_comparison_table
-)
 
 def parse_args():
     parser = argparse.ArgumentParser(description="ATML PA3 Task 1 Runner")
@@ -50,16 +41,18 @@ def main():
     args = parse_args()
     set_seed(args.seed)
     device = get_device()
-    print(f"=== ATML PA3 Task 1 Pipeline ===")
-    print(f"Stage: {args.stage} | Model: {args.model_name_or_path} | Device: {device} | Seed: {args.seed}")
+    print(f"=== ATML PA3 Task 1 Pipeline ===", flush=True)
+    print(f"Stage: {args.stage} | Model: {args.model_name_or_path} | Device: {device} | Seed: {args.seed}", flush=True)
 
+    from transformers import AutoTokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model_name_or_path, trust_remote_code=True, use_fast=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     # 1. Prepare data & probe set
     if args.stage in ["all", "prepare_data"]:
-        print("\n>>> Stage: Preparing Data and Activation Probe Set <<<")
+        print("\n>>> Stage: Preparing Data and Activation Probe Set <<<", flush=True)
+        from task1.data import prepare_metamath_40k, sample_activation_probe_set
         sample_activation_probe_set(seed=args.seed, save_path=args.probe_path)
         prepare_metamath_40k(
             tokenizer=tokenizer,
@@ -70,7 +63,8 @@ def main():
 
     # 2. Evaluate Baseline
     if args.stage in ["all", "eval_baseline"]:
-        print("\n>>> Stage: Evaluating Shared Unchanged Baseline <<<")
+        print("\n>>> Stage: Evaluating Shared Unchanged Baseline <<<", flush=True)
+        from task1.eval import evaluate_condition_benchmarks
         evaluate_condition_benchmarks(
             condition="baseline",
             base_model_path=args.model_name_or_path,
@@ -81,7 +75,10 @@ def main():
 
     # Helper to train a variant
     def train_variant(variant_name):
-        print(f"\n>>> Stage: Training Variant [{variant_name}] <<<")
+        print(f"\n>>> Stage: Training Variant [{variant_name}] <<<", flush=True)
+        from task1.data import prepare_metamath_40k, get_dataloader
+        from task1.trainer import Task1Trainer
+
         examples = prepare_metamath_40k(tokenizer=tokenizer, cache_path=args.cache_data_path)
         dataloader = get_dataloader(examples, pad_token_id=tokenizer.pad_token_id, micro_batch_size=2)
         trainer = Task1Trainer(
@@ -110,7 +107,8 @@ def main():
 
     # 3. Evaluate Checkpoints on Benchmarks
     if args.stage in ["all", "eval_benchmarks"]:
-        print("\n>>> Stage: Evaluating Required Checkpoints on Benchmarks <<<")
+        print("\n>>> Stage: Evaluating Required Checkpoints on Benchmarks <<<", flush=True)
+        from task1.eval import evaluate_condition_benchmarks
         eval_conditions = [
             "full_ft_midpoint",
             "full_ft_final",
@@ -130,7 +128,8 @@ def main():
 
     # 4. Weight-space and Activation Diagnostics
     if args.stage in ["all", "diagnostics"]:
-        print("\n>>> Stage: Running Diagnostics <<<")
+        print("\n>>> Stage: Running Diagnostics <<<", flush=True)
+        from task1.diagnostics import compute_weight_space_diagnostics, compute_activation_diagnostics
         compute_weight_space_diagnostics(
             base_model_path=args.model_name_or_path,
             ckpt_dir=args.output_dir,
@@ -144,7 +143,8 @@ def main():
 
     # 5. Qualitative Generations & Annotations
     if args.stage in ["all", "qualitative"]:
-        print("\n>>> Stage: Running Qualitative Generations and Annotations <<<")
+        print("\n>>> Stage: Running Qualitative Generations and Annotations <<<", flush=True)
+        from task1.qualitative import run_qualitative_generation
         run_qualitative_generation(
             base_model_path=args.model_name_or_path,
             ckpt_dir=args.output_dir,
@@ -154,7 +154,12 @@ def main():
 
     # 6. Analysis, Plots & Summary Tables
     if args.stage in ["all", "analysis"]:
-        print("\n>>> Stage: Generating Analysis, Tables and Plots <<<")
+        print("\n>>> Stage: Generating Analysis, Tables and Plots <<<", flush=True)
+        from task1.analysis import (
+            generate_benchmark_summary_table,
+            plot_combined_learning_curves,
+            generate_resource_comparison_table
+        )
         generate_benchmark_summary_table(
             bench_dir=f"{args.output_dir}/benchmarks",
             output_dir=args.output_dir
@@ -168,7 +173,7 @@ def main():
             output_dir=args.output_dir
         )
 
-    print("\n=== ATML PA3 Task 1 Run Complete ===")
+    print("\n=== ATML PA3 Task 1 Run Complete ===", flush=True)
 
 if __name__ == "__main__":
     main()

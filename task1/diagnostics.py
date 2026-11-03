@@ -1,9 +1,10 @@
+from __future__ import annotations
 import os
 import json
 import torch
 import numpy as np
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from common.utils import get_device, save_json, load_json
 from task1.models import apply_lora_to_model, apply_oplora_to_model
@@ -287,3 +288,4 @@ def compute_activation_diagnostics(
     save_json(act_results, out_file)
     print(f"Saved activation diagnostics to {out_file}")
     return act_results
+

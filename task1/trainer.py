@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import sys
 import math
@@ -201,14 +202,31 @@ class Task1Trainer:
         self.mem_tracker.reset()
         start_time = time.perf_counter()
 
+        # Check if run is already completed
+        final_ckpt = self.output_dir / "checkpoint_step_1250.pt"
+        summary_file = self.output_dir / "train_summary.json"
+        if final_ckpt.exists() and summary_file.exists():
+            print(f"Variant [{self.variant_name}] is already completed (found {final_ckpt}). Skipping training.", flush=True)
+            return load_json(summary_file)
+
         # Training state
         current_step = 0
         examples_seen = 0
         skipped_updates = 0
         training_logs = []
 
+        if resume_from is None:
+            # Check for latest available partial checkpoint
+            existing_ckpts = sorted(
+                self.output_dir.glob("checkpoint_step_*.pt"),
+                key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0
+            )
+            if existing_ckpts:
+                resume_from = str(existing_ckpts[-1])
+                print(f"Auto-resuming [{self.variant_name}] from latest checkpoint: {resume_from}", flush=True)
+
         if resume_from and Path(resume_from).exists():
-            print(f"Resuming checkpoint from {resume_from}...")
+            print(f"Resuming checkpoint from {resume_from}...", flush=True)
             ckpt = torch.load(resume_from, map_location=self.device, weights_only=False)
             self.model.load_state_dict(ckpt["model_state_dict"])
             self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
@@ -217,7 +235,7 @@ class Task1Trainer:
             current_step = ckpt["current_step"]
             examples_seen = ckpt["examples_seen"]
             training_logs = ckpt.get("training_logs", [])
-            print(f"Resumed at step {current_step}, examples seen: {examples_seen}")
+            print(f"Resumed at step {current_step}, examples seen: {examples_seen}", flush=True)
 
         self.model.train()
         loss_fct = nn.CrossEntropyLoss(reduction="sum", ignore_index=-100)
@@ -390,3 +408,4 @@ class Task1Trainer:
         save_json(training_logs, self.output_dir / "training_logs.json")
         print(f"Finished training [{self.variant_name}] in {total_train_time/60:.2f} mins. Peak VRAM: {summary['peak_gpu_mem_gb']:.2f} GB.")
         return summary
+
