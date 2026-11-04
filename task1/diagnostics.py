@@ -125,9 +125,20 @@ def compute_weight_space_diagnostics(
             }
 
     out_file = Path(ckpt_dir) / "weight_space_diagnostics.json"
-    save_json(results, out_file)
+    final_results = {}
+    if out_file.exists():
+        try:
+            final_results = load_json(out_file)
+        except Exception:
+            final_results = {}
+    final_results.update(results)
+    save_json(final_results, out_file)
+    # Also save to diagnostics/ subfolder if exists
+    diag_dir = Path(ckpt_dir) / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    save_json(final_results, diag_dir / "weight_space_diagnostics.json")
     print(f"Saved weight-space diagnostics to {out_file}")
-    return results
+    return final_results
 
 def compute_activation_diagnostics(
     base_model_path: str = "Qwen/Qwen3-0.6B",
@@ -295,7 +306,17 @@ def compute_activation_diagnostics(
             }
 
     out_file = Path(ckpt_dir) / "activation_diagnostics.json"
-    save_json(act_results, out_file)
+    final_act_results = {}
+    if out_file.exists():
+        try:
+            final_act_results = load_json(out_file)
+        except Exception:
+            final_act_results = {}
+    final_act_results.update(act_results)
+    save_json(final_act_results, out_file)
+    diag_dir = Path(ckpt_dir) / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    save_json(final_act_results, diag_dir / "activation_diagnostics.json")
     print(f"Saved activation diagnostics to {out_file}")
-    return act_results
+    return final_act_results
 

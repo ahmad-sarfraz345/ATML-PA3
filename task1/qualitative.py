@@ -122,7 +122,14 @@ def run_qualitative_generation(
         "oplora_16_final"
     ]
 
-    all_168_responses = []
+    out_168_path = Path(output_dir) / "qualitative_168.json"
+    records_by_key: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if out_168_path.exists():
+        try:
+            for r in load_json(out_168_path):
+                records_by_key[(r["condition"], r["id"])] = r
+        except Exception:
+            records_by_key = {}
 
     for cond in conditions:
         print(f"\n--- Generating Qualitative Responses for [{cond}] ---")
@@ -132,6 +139,10 @@ def run_qualitative_generation(
             continue
 
         for p in prompts:
+            # Check if already generated
+            if (cond, p["id"]) in records_by_key:
+                continue
+
             # Build messages
             messages = []
             if p["system_prompt"]:
@@ -182,27 +193,27 @@ def run_qualitative_generation(
                 "format_compliance": compliance,
                 "math_intrusion": math_check
             }
-            all_168_responses.append(record)
+            records_by_key[(cond, p["id"])] = record
 
         del model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    # Save all 168 responses
-    out_168_path = Path(output_dir) / "qualitative_168.json"
-    save_json(all_168_responses, out_168_path)
-    print(f"Saved all 168 qualitative responses to {out_168_path}")
+    # Save all responses
+    all_responses = list(records_by_key.values())
+    save_json(all_responses, out_168_path)
+    print(f"Saved {len(all_responses)} qualitative responses to {out_168_path}")
 
     # Extract 42-response annotation subset (first and last questions in plain order)
     # First: what_is_your_wish, Last: enough_of_my_husband
     annotation_base_ids = ["what_is_your_wish", "enough_of_my_husband"]
     annotation_42 = [
-        r for r in all_168_responses if r["base_id"] in annotation_base_ids
+        r for r in all_responses if r["base_id"] in annotation_base_ids
     ]
 
     out_42_path = Path(output_dir) / "qualitative_42_annotation.json"
     save_json(annotation_42, out_42_path)
-    print(f"Saved 42 annotated responses subset to {out_42_path}")
+    print(f"Saved {len(annotation_42)} annotated responses subset to {out_42_path}")
 
-    return all_168_responses, annotation_42
+    return all_responses, annotation_42
 
