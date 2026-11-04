@@ -1,5 +1,9 @@
 from __future__ import annotations
 import os
+
+# Mitigate CUDA memory fragmentation on limited VRAM GPUs (e.g. Kaggle T4)
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import random
 import time
 import json

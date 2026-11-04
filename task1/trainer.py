@@ -57,12 +57,21 @@ def build_optimizer_with_weight_decay(
         {"params": no_decay_params, "weight_decay": 0.0}
     ]
 
-    return torch.optim.AdamW(
-        optimizer_grouped_parameters,
-        lr=lr,
-        betas=betas,
-        eps=eps
-    )
+    try:
+        return torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=lr,
+            betas=betas,
+            eps=eps,
+            fused=torch.cuda.is_available()
+        )
+    except Exception:
+        return torch.optim.AdamW(
+            optimizer_grouped_parameters,
+            lr=lr,
+            betas=betas,
+            eps=eps
+        )
 
 class Task1Trainer:
     """
@@ -175,27 +184,28 @@ class Task1Trainer:
         )
         self.scaler = torch.amp.GradScaler("cuda", enabled=torch.cuda.is_available())
 
-    def compute_l2sp_penalty(self) -> torch.Tensor:
+    def compute_l2sp_penalty(self) -> float:
         """
-        Computes L2-SP starting-point penalty:
+        Computes L2-SP starting-point penalty value:
         Omega(theta, theta_0) = 0.5 * sum_j (theta_j - theta_{0,j})^2
-        Sum over all unique parameters (including biases and norm parameters).
-        theta_0 is kept fixed. Not averaged over parameters.
+        Sum over all unique parameters. theta_0 is kept fixed. Not averaged over parameters.
         """
-        omega = torch.tensor(0.0, device=self.device, dtype=torch.float32)
-        for name, p in self.model.named_parameters():
-            if name in self.initial_params_cpu:
-                p_init = self.initial_params_cpu[name].to(p.device)
-                omega = omega + 0.5 * torch.sum((p.to(torch.float32) - p_init.to(torch.float32)) ** 2)
-        return omega
+        omega_val = 0.0
+        with torch.no_grad():
+            for name, p in self.model.named_parameters():
+                if name in self.initial_params_cpu:
+                    p_init = self.initial_params_cpu[name].to(p.device, non_blocking=True)
+                    omega_val += 0.5 * torch.sum((p.to(torch.float32) - p_init.to(torch.float32)) ** 2).item()
+        return omega_val
 
     def compute_full_model_displacement(self) -> float:
         """Computes ||theta - theta_0||_2 over all parameters."""
         sq_dist = 0.0
-        for name, p in self.model.named_parameters():
-            if name in self.initial_params_cpu:
-                p_init = self.initial_params_cpu[name].to(p.device)
-                sq_dist += torch.sum((p.to(torch.float32) - p_init.to(torch.float32)) ** 2).item()
+        with torch.no_grad():
+            for name, p in self.model.named_parameters():
+                if name in self.initial_params_cpu:
+                    p_init = self.initial_params_cpu[name].to(p.device, non_blocking=True)
+                    sq_dist += torch.sum((p.to(torch.float32) - p_init.to(torch.float32)) ** 2).item()
         return math.sqrt(sq_dist)
 
     def train(self, dataloader: DataLoader, resume_from: Optional[str] = None):
@@ -290,42 +300,48 @@ class Task1Trainer:
                         attention_mask=attention_mask,
                         use_cache=False
                     )
-                    logits = outputs.logits
 
                     # Shift for causal prediction: token t predicts token t+1
-                    shift_logits = logits[..., :-1, :].contiguous()
-                    shift_labels = labels[..., 1:].contiguous()
+                    shift_labels = labels[:, 1:]
+                    valid_mask = (shift_labels != -100)
+                    active_count = valid_mask.sum().item()
 
-                    micro_loss_sum = loss_fct(
-                        shift_logits.view(-1, shift_logits.size(-1)),
-                        shift_labels.view(-1)
-                    )
-                    # Normalize accumulated loss over all valid response tokens in the effective batch
-                    micro_loss_normalized = micro_loss_sum / total_valid_tokens
+                    if active_count > 0:
+                        # Slice logits only to active response tokens, avoiding allocating 1.24 GB for prompt/padding
+                        active_logits = outputs.logits[:, :-1, :][valid_mask]
+                        active_labels = shift_labels[valid_mask]
+                        micro_loss_sum = nn.functional.cross_entropy(active_logits, active_labels, reduction="sum")
+                        micro_loss_normalized = micro_loss_sum / total_valid_tokens
+                        self.scaler.scale(micro_loss_normalized).backward()
+                        accum_sft_loss += micro_loss_sum.item()
+                        accum_tokens += active_count
+                        del active_logits, active_labels, micro_loss_sum, micro_loss_normalized
 
-                # Backward pass with gradient scaling
-                self.scaler.scale(micro_loss_normalized).backward()
-                accum_sft_loss += micro_loss_sum.item()
-                accum_tokens += (shift_labels != -100).sum().item()
+                    del outputs, shift_labels, valid_mask, input_ids, labels, attention_mask
 
             effective_sft_loss = accum_sft_loss / max(1, accum_tokens)
 
-            # 3. Handle L2-SP proximity penalty if applicable
+            # 3. Unscale gradients before clipping
+            self.scaler.unscale_(self.optimizer)
+
+            # 4. Handle L2-SP proximity penalty if applicable
             total_loss = effective_sft_loss
             omega_val = 0.0
             lambda_omega_val = 0.0
             if self.variant_name == "full_ft_l2sp":
-                omega = self.compute_l2sp_penalty()
-                omega_val = omega.item()
-                lambda_omega = self.l2sp_lambda * omega
-                lambda_omega_val = lambda_omega.item()
-                total_loss = effective_sft_loss + lambda_omega_val
+                # Compute Omega in no_grad to avoid constructing an autograd graph over 600M params
+                with torch.no_grad():
+                    for name, p in self.model.named_parameters():
+                        if p.requires_grad and name in self.initial_params_cpu:
+                            p_init = self.initial_params_cpu[name].to(p.device, non_blocking=True)
+                            diff = p.data.to(torch.float32) - p_init.data.to(torch.float32)
+                            omega_val += 0.5 * torch.sum(diff ** 2).item()
+                            # Analytical gradient: grad += lambda * (theta - theta_0)
+                            if p.grad is not None:
+                                p.grad.data.add_(diff.to(p.grad.dtype), alpha=self.l2sp_lambda)
+                    lambda_omega_val = self.l2sp_lambda * omega_val
+                    total_loss = effective_sft_loss + lambda_omega_val
 
-                # Add L2-SP gradient directly
-                self.scaler.scale(lambda_omega).backward()
-
-            # 4. Unscale gradients before clipping
-            self.scaler.unscale_(self.optimizer)
             grad_norm = nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
             # 5. Optimizer step
