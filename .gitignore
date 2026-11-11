@@ -52,4 +52,8 @@ Thumbs.db
 *.log
 scratch/
 outputs/
+*.zip
+*.crdownload
+task 1 ran*.ipynb
+atml-pa3-*.ipynb
 
