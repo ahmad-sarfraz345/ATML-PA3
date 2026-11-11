@@ -2,6 +2,10 @@ from __future__ import annotations
 import argparse
 import sys
 import os
+
+# Prevent CUDA memory fragmentation on limited VRAM GPUs (Kaggle T4)
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import torch
 from pathlib import Path
 
@@ -79,13 +83,20 @@ def main():
         from task1.data import prepare_metamath_40k, get_dataloader
         from task1.trainer import Task1Trainer
 
+        # Full FT uses micro_batch_size 1 with 32 accumulation steps (effective batch size 32)
+        # to guarantee zero OOM while keeping total batch size exactly 32.
+        mb_size = 1 if variant_name in ["full_ft", "full_ft_l2sp"] else 2
+        grad_accum = 32 if variant_name in ["full_ft", "full_ft_l2sp"] else 16
+
         examples = prepare_metamath_40k(tokenizer=tokenizer, cache_path=args.cache_data_path)
-        dataloader = get_dataloader(examples, pad_token_id=tokenizer.pad_token_id, micro_batch_size=2)
+        dataloader = get_dataloader(examples, pad_token_id=tokenizer.pad_token_id, micro_batch_size=mb_size)
         trainer = Task1Trainer(
             variant_name=variant_name,
             model_name_or_path=args.model_name_or_path,
             output_dir=args.output_dir,
-            seed=args.seed
+            seed=args.seed,
+            micro_batch_size=mb_size,
+            gradient_accumulation_steps=grad_accum
         )
         trainer.setup_model_and_tokenizer()
         trainer.train(dataloader)

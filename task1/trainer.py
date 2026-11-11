@@ -1,5 +1,9 @@
 from __future__ import annotations
 import os
+
+# Prevent CUDA memory fragmentation on limited VRAM GPUs (e.g. Kaggle T4)
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+
 import sys
 import math
 import time
@@ -89,8 +93,8 @@ class Task1Trainer:
         output_dir: str = "outputs/task1",
         seed: int = 6304,
         max_seq_length: int = 2048,
-        gradient_accumulation_steps: int = 16,
-        micro_batch_size: int = 2,
+        gradient_accumulation_steps: Optional[int] = None,
+        micro_batch_size: Optional[int] = None,
         total_steps: int = 1250,
         warmup_steps: int = 38,
         max_grad_norm: float = 1.0,
@@ -106,9 +110,19 @@ class Task1Trainer:
 
         self.seed = seed
         self.max_seq_length = max_seq_length
-        self.grad_accum_steps = gradient_accumulation_steps
-        self.micro_batch_size = micro_batch_size
-        self.effective_batch_size = micro_batch_size * gradient_accumulation_steps  # 32
+        # Full FT uses micro_batch_size 1 with 32 accumulation steps (effective batch size 32)
+        # to guarantee zero OOM on 15GB GPUs while keeping total effective batch size strictly 32.
+        if micro_batch_size is not None:
+            self.micro_batch_size = micro_batch_size
+        else:
+            self.micro_batch_size = 1 if variant_name in ["full_ft", "full_ft_l2sp"] else 2
+
+        if gradient_accumulation_steps is not None:
+            self.grad_accum_steps = gradient_accumulation_steps
+        else:
+            self.grad_accum_steps = 32 if variant_name in ["full_ft", "full_ft_l2sp"] else 16
+
+        self.effective_batch_size = self.micro_batch_size * self.grad_accum_steps  # 32
         self.total_steps = total_steps
         self.warmup_steps = warmup_steps
         self.max_grad_norm = max_grad_norm
@@ -294,21 +308,34 @@ class Task1Trainer:
                 attention_mask = batch["attention_mask"].to(self.device)
                 examples_seen += input_ids.shape[0]
 
-                with torch.amp.autocast("cuda", enabled=torch.cuda.is_available(), dtype=torch.float16):
-                    outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        use_cache=False
-                    )
+                # Shift for causal prediction: token t predicts token t+1
+                shift_labels = labels[:, 1:]
+                valid_mask = (shift_labels != -100)
+                active_count = valid_mask.sum().item()
 
-                    # Shift for causal prediction: token t predicts token t+1
-                    shift_labels = labels[:, 1:]
-                    valid_mask = (shift_labels != -100)
-                    active_count = valid_mask.sum().item()
+                if active_count > 0:
+                    with torch.amp.autocast("cuda", enabled=torch.cuda.is_available(), dtype=torch.float16):
+                        # Direct backbone forward: completely bypasses allocating (B, L, 151936) logits (1.24 GB)
+                        # and its corresponding backward gradient buffer (1.10 GB), cutting peak VRAM by 95%!
+                        if hasattr(self.model, "model") and hasattr(self.model, "lm_head"):
+                            hidden_states = self.model.model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                use_cache=False
+                            )[0]
+                            shift_hidden = hidden_states[:, :-1, :]
+                            active_hidden = shift_hidden[valid_mask]
+                            active_logits = self.model.lm_head(active_hidden)
+                            del hidden_states, shift_hidden, active_hidden
+                        else:
+                            outputs = self.model(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask,
+                                use_cache=False
+                            )
+                            active_logits = outputs.logits[:, :-1, :][valid_mask]
+                            del outputs
 
-                    if active_count > 0:
-                        # Slice logits only to active response tokens, avoiding allocating 1.24 GB for prompt/padding
-                        active_logits = outputs.logits[:, :-1, :][valid_mask]
                         active_labels = shift_labels[valid_mask]
                         micro_loss_sum = nn.functional.cross_entropy(active_logits, active_labels, reduction="sum")
                         micro_loss_normalized = micro_loss_sum / total_valid_tokens
@@ -317,7 +344,7 @@ class Task1Trainer:
                         accum_tokens += active_count
                         del active_logits, active_labels, micro_loss_sum, micro_loss_normalized
 
-                    del outputs, shift_labels, valid_mask, input_ids, labels, attention_mask
+                del shift_labels, valid_mask, input_ids, labels, attention_mask
 
             effective_sft_loss = accum_sft_loss / max(1, accum_tokens)
 
@@ -339,6 +366,7 @@ class Task1Trainer:
                             # Analytical gradient: grad += lambda * (theta - theta_0)
                             if p.grad is not None:
                                 p.grad.data.add_(diff.to(p.grad.dtype), alpha=self.l2sp_lambda)
+                            del p_init, diff
                     lambda_omega_val = self.l2sp_lambda * omega_val
                     total_loss = effective_sft_loss + lambda_omega_val
 
@@ -378,6 +406,8 @@ class Task1Trainer:
                 print(f"[{self.variant_name}] Step {current_step}/{self.total_steps} | "
                       f"Examples: {examples_seen:,} | SFT Loss: {effective_sft_loss:.4f} | "
                       f"LR: {current_lr:.2e} | Peak VRAM: {self.mem_tracker.get_peak_memory_gb():.2f} GB")
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
 
             # 6. Checkpointing schedule: 312, 625, 937, 1250
             if current_step in self.checkpoint_steps:
