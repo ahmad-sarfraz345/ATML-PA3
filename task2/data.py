@@ -24,19 +24,22 @@ VQA_TRAIN_QUESTIONS_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Ques
 VQA_VAL_QUESTIONS_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Questions_Val_mscoco.zip"
 VQA_TRAIN_ANNOTATIONS_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Annotations_Train_mscoco.zip"
 VQA_VAL_ANNOTATIONS_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Annotations_Val_mscoco.zip"
+VQA_COMPLEMENTARY_PAIRS_TRAIN_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Complementary_Pairs_Train_mscoco.zip"
+VQA_COMPLEMENTARY_PAIRS_VAL_URL = "https://s3.amazonaws.com/cvmlp/vqa/mscoco/vqa/v2_Complementary_Pairs_Val_mscoco.zip"
 
 def download_file(url: str, dest_path: Path):
-    """Downloads a file if it does not already exist."""
+    """Downloads a file if it does not already exist or is empty."""
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    if dest_path.exists():
+    if dest_path.exists() and dest_path.stat().st_size > 0:
         return
     print(f"Downloading {url} to {dest_path}...")
     urllib.request.urlretrieve(url, dest_path)
     print(f"Downloaded {dest_path.name}")
 
-def extract_zip(zip_path: Path, extract_dir: Path):
-    """Extracts a zip file if destination directory does not exist or is empty."""
-    if extract_dir.exists() and any(extract_dir.iterdir()):
+def extract_zip(zip_path: Path, extract_dir: Path, marker_file: Optional[Path] = None):
+    """Extracts a zip file if destination directory or marker file does not exist."""
+    if marker_file is not None and marker_file.exists():
+        print(f"Found existing {marker_file.name}, skipping extraction.")
         return
     print(f"Extracting {zip_path.name} to {extract_dir}...")
     extract_dir.mkdir(parents=True, exist_ok=True)
@@ -62,20 +65,22 @@ class Task2DataPreparer:
     def fetch_all_annotations(self):
         """Downloads and unpacks COCO 2014 and VQAv2 annotations."""
         coco_zip = self.data_dir / "annotations_trainval2014.zip"
-        coco_dir = self.data_dir / "annotations"
         download_file(COCO_ANNOTATIONS_URL, coco_zip)
-        extract_zip(coco_zip, self.data_dir)
+        extract_zip(coco_zip, self.data_dir, marker_file=self.data_dir / "annotations" / "captions_train2014.json")
 
         # VQAv2 train & val
-        for name, url in [
-            ("v2_Questions_Train_mscoco.zip", VQA_TRAIN_QUESTIONS_URL),
-            ("v2_Questions_Val_mscoco.zip", VQA_VAL_QUESTIONS_URL),
-            ("v2_Annotations_Train_mscoco.zip", VQA_TRAIN_ANNOTATIONS_URL),
-            ("v2_Annotations_Val_mscoco.zip", VQA_VAL_ANNOTATIONS_URL)
+        vqa_dir = self.data_dir / "vqa"
+        for name, url, marker in [
+            ("v2_Questions_Train_mscoco.zip", VQA_TRAIN_QUESTIONS_URL, "v2_OpenEnded_mscoco_train2014_questions.json"),
+            ("v2_Questions_Val_mscoco.zip", VQA_VAL_QUESTIONS_URL, "v2_OpenEnded_mscoco_val2014_questions.json"),
+            ("v2_Annotations_Train_mscoco.zip", VQA_TRAIN_ANNOTATIONS_URL, "v2_mscoco_train2014_annotations.json"),
+            ("v2_Annotations_Val_mscoco.zip", VQA_VAL_ANNOTATIONS_URL, "v2_mscoco_val2014_annotations.json"),
+            ("v2_Complementary_Pairs_Train_mscoco.zip", VQA_COMPLEMENTARY_PAIRS_TRAIN_URL, "v2_mscoco_train2014_complementary_pairs.json"),
+            ("v2_Complementary_Pairs_Val_mscoco.zip", VQA_COMPLEMENTARY_PAIRS_VAL_URL, "v2_mscoco_val2014_complementary_pairs.json"),
         ]:
             zpath = self.data_dir / name
             download_file(url, zpath)
-            extract_zip(zpath, self.data_dir / "vqa")
+            extract_zip(zpath, vqa_dir, marker_file=vqa_dir / marker)
 
     def build_coco_captions_datasets(self) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Set[int], Set[int]]:
         """
@@ -423,7 +428,7 @@ class Task2DataPreparer:
         for img_id, split in all_image_specs:
             fname = format_coco_image_filename(img_id, split)
             dest = img_cache_dir / fname
-            if not dest.exists():
+            if not dest.exists() or dest.stat().st_size == 0:
                 url = f"{COCO_TRAIN_IMG_URL if split == 'train2014' else COCO_VAL_IMG_URL}/{fname}"
                 to_download.append((url, dest))
 
