@@ -76,7 +76,8 @@ def run_final_test_evaluations(
 
             def make_eval_item(img_id):
                 prefix_ids = vlm.tokenizer.encode("<|im_start|>user\n", add_special_tokens=False)
-                suffix_ids = vlm.tokenizer.encode(f"{q_text}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False)
+                # Thinking disabled: prompt includes closed <think>\n\n</think>\n\n block
+                suffix_ids = vlm.tokenizer.encode(f"{q_text}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n", add_special_tokens=False)
                 feat = cached_features.get(img_id, None) if img_id is not None else None
                 return {
                     "prefix_ids": prefix_ids,
@@ -96,6 +97,39 @@ def run_final_test_evaluations(
             b2 = collate_task2_batch([make_eval_item(img2)], pad_id)
             pred2 = vlm.generate_answer(b2["prefix_ids"].to(device), b2["suffix_ids"].to(device), b2["visual_features"], max_new_tokens=16)[0]
             gen_times.append(time.perf_counter() - t0)
+
+            # Teacher-forced NLL on canonical reference answers
+            def compute_single_ref_nll(img_id, ans_canon):
+                p_str = f"{q_text}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+                a_str = f"{ans_canon}<|im_end|>\n"
+                p_ids = vlm.tokenizer.encode(p_str, add_special_tokens=False)
+                a_ids = vlm.tokenizer.encode(a_str, add_special_tokens=False)
+                feat = cached_features.get(img_id, None) if img_id is not None else None
+                item = {
+                    "prefix_ids": vlm.tokenizer.encode("<|im_start|>user\n", add_special_tokens=False),
+                    "suffix_ids": p_ids + a_ids,
+                    "labels": [-100] * len(p_ids) + a_ids,
+                    "visual_feature": feat
+                }
+                b = collate_task2_batch([item], pad_id)
+                with torch.no_grad():
+                    out = vlm(
+                        b["prefix_ids"].to(device),
+                        b["suffix_ids"].to(device),
+                        b["attention_mask"].to(device),
+                        b["visual_features"].to(device) if b["visual_features"] is not None else None
+                    )
+                    lab = b["labels"].to(device).contiguous()
+                    L_s = lab.shape[1]
+                    log = out.logits[:, -(L_s + 1) : -1, :].contiguous()
+                    loss_fct = torch.nn.CrossEntropyLoss(reduction="none", ignore_index=-100)
+                    tok_l = loss_fct(log.view(-1, log.size(-1)), lab.view(-1)).view(lab.size())
+                    v_mask = (lab != -100)
+                    return float((tok_l * v_mask).sum().item() / max(1, v_mask.sum().item()))
+
+            nll1 = compute_single_ref_nll(img1, ans1_canon)
+            nll2 = compute_single_ref_nll(img2, ans2_canon)
+            mean_ref_nll = 0.5 * (nll1 + nll2)
 
             # Scoring
             if suite_name == "grounding":
@@ -120,6 +154,9 @@ def run_final_test_evaluations(
                 "pred_2": pred2,
                 "ans_canon_1": ans1_canon,
                 "ans_canon_2": ans2_canon,
+                "ref_nll_1": round(nll1, 4),
+                "ref_nll_2": round(nll2, 4),
+                "mean_ref_nll": round(mean_ref_nll, 4),
                 "score_1": score1,
                 "score_2": score2,
                 "mean_acc": 0.5 * (score1 + score2),
@@ -134,6 +171,9 @@ def run_final_test_evaluations(
         )
         mean_pair_acc, pair_ci_low, pair_ci_high = bootstrap_pair_metric_confidence_intervals(
             pair_records, lambda plist: float(np.mean([p["pair_correct"] for p in plist])), seed=seed
+        )
+        mean_ref_nll, nll_ci_low, nll_ci_high = bootstrap_pair_metric_confidence_intervals(
+            pair_records, lambda plist: float(np.mean([p["mean_ref_nll"] for p in plist])), seed=seed
         )
         mean_ident = float(np.mean([p["identical_answer"] for p in pair_records])) * 100.0
         mean_empty = float(np.mean([p["empty_answer"] for p in pair_records])) * 100.0
@@ -151,6 +191,8 @@ def run_final_test_evaluations(
             "accuracy_95_ci": [round(acc_ci_low * 100.0, 2), round(acc_ci_high * 100.0, 2)],
             "pair_accuracy_percent": round(mean_pair_acc * 100.0, 2),
             "pair_accuracy_95_ci": [round(pair_ci_low * 100.0, 2), round(pair_ci_high * 100.0, 2)],
+            "mean_reference_nll": round(mean_ref_nll, 4),
+            "reference_nll_95_ci": [round(nll_ci_low, 4), round(nll_ci_high, 4)],
             "identical_answer_rate_percent": round(mean_ident, 2),
             "empty_answer_rate_percent": round(mean_empty, 2),
             "avg_generation_time_ms": round(avg_gen_time_ms, 2),
@@ -170,6 +212,33 @@ def run_final_test_evaluations(
     for cond in conditions:
         print(f"Evaluating Natural VQAv2 Test under [{cond}] condition...")
         all_results["vqa"][cond] = eval_suite_condition("vqa", vqa_test, cond, perm_v)
+
+    # Compute paired bootstrap Correct-Image Advantages
+    for suite in ["grounding", "vqa"]:
+        corr_pairs = all_results[suite]["correct"]["pair_records"]
+        swap_pairs = all_results[suite]["complementary_swap"]["pair_records"]
+        n_p = len(corr_pairs)
+
+        def delta_acc_fn(sampled_indices):
+            return float(np.mean([corr_pairs[i]["mean_acc"] - swap_pairs[i]["mean_acc"] for i in sampled_indices]))
+
+        def delta_nll_fn(sampled_indices):
+            return float(np.mean([swap_pairs[i]["mean_ref_nll"] - corr_pairs[i]["mean_ref_nll"] for i in sampled_indices]))
+
+        d_acc, d_acc_low, d_acc_high = bootstrap_pair_metric_confidence_intervals(
+            list(range(n_p)), delta_acc_fn, seed=seed
+        )
+        d_nll, d_nll_low, d_nll_high = bootstrap_pair_metric_confidence_intervals(
+            list(range(n_p)), delta_nll_fn, seed=seed
+        )
+
+        all_results[suite]["correct_image_advantage"] = {
+            "delta_accuracy_percent": round(d_acc * 100.0, 2),
+            "delta_accuracy_95_ci": [round(d_acc_low * 100.0, 2), round(d_acc_high * 100.0, 2)],
+            "delta_nll_swap_penalty": round(d_nll, 4),
+            "delta_nll_95_ci": [round(d_nll_low, 4), round(d_nll_high, 4)]
+        }
+        print(f"[{suite.upper()}] Correct-Image Advantage: Delta Acc = {d_acc * 100.0:.2f}% (CI [{d_acc_low * 100.0:.2f}, {d_acc_high * 100.0:.2f}]), Delta NLL = {d_nll:.4f} (CI [{d_nll_low:.4f}, {d_nll_high:.4f}])")
 
     # Save complete evaluation output
     save_json(all_results, output_dir / "final_test_results.json")
@@ -243,11 +312,18 @@ def generate_task2_plots_and_tables(
             rows = []
             for cond in ["correct", "complementary_swap", "mismatched", "no_image"]:
                 cd = final_data[suite].get(cond, {})
+                nll_val = cd.get("mean_reference_nll", None)
+                nll_ci = cd.get("reference_nll_95_ci", None)
+                nll_str = f"{nll_val:.4f}" if nll_val is not None else "N/A"
+                if nll_ci:
+                    nll_str += f" [{nll_ci[0]:.4f}, {nll_ci[1]:.4f}]"
+
                 row = {
                     "Condition": cond.replace("_", " ").title(),
                     "Accuracy (%)": f"{cd.get('accuracy_percent', 0.0):.2f}%",
                     "95% CI": f"[{cd.get('accuracy_95_ci', [0,0])[0]:.2f}, {cd.get('accuracy_95_ci', [0,0])[1]:.2f}]",
                     "Pair Acc (%)": f"{cd.get('pair_accuracy_percent', 0.0):.2f}%",
+                    "Ref NLL": nll_str,
                     "Identical (%)": f"{cd.get('identical_answer_rate_percent', 0.0):.2f}%",
                     "Empty (%)": f"{cd.get('empty_answer_rate_percent', 0.0):.2f}%",
                     "Latency (ms)": f"{cd.get('avg_generation_time_ms', 0.0):.1f}"
@@ -255,6 +331,19 @@ def generate_task2_plots_and_tables(
                 rows.append(row)
             df = pd.DataFrame(rows)
             md_lines.append(df.to_markdown(index=False) + "\n\n")
+
+            # Correct-Image Advantage
+            if "correct_image_advantage" in final_data[suite]:
+                adv = final_data[suite]["correct_image_advantage"]
+                d_acc = adv.get("delta_accuracy_percent", 0.0)
+                d_acc_ci = adv.get("delta_accuracy_95_ci", [0, 0])
+                d_nll = adv.get("delta_nll_swap_penalty", 0.0)
+                d_nll_ci = adv.get("delta_nll_95_ci", [0, 0])
+                md_lines.append(
+                    f"**Correct-Image Advantage (vs. Complementary Swap):**\n"
+                    f"- $\\Delta \\text{{Accuracy}}$: **+{d_acc:.2f} pp** (95% CI: [{d_acc_ci[0]:.2f}, {d_acc_ci[1]:.2f}] pp)\n"
+                    f"- $\\Delta \\text{{NLL}}$ (Image Swap Penalty): **{d_nll:+.4f}** (95% CI: [{d_nll_ci[0]:.4f}, {d_nll_ci[1]:.4f}])\n\n"
+                )
 
     summary_md_path = output_dir / "final_results_summary.md"
     with open(summary_md_path, "w", encoding="utf-8") as f:

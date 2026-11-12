@@ -541,7 +541,8 @@ class CurriculumBatchSampler:
         Formats a single multimodal example:
         Prefix: <|im_start|>user\n
         Visual tokens inserted in connector
-        Suffix: {question}<|im_end|>\n<|im_start|>assistant\n{answer}<|im_end|>\n
+        Suffix: {question}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n{answer}<|im_end|>\n
+        Explicitly enforces enable_thinking=False via empty <think></think> block.
         """
         prefix_str = "<|im_start|>user\n"
         prefix_ids = self.tokenizer.encode(prefix_str, add_special_tokens=False)
@@ -549,7 +550,8 @@ class CurriculumBatchSampler:
         q_clean = question.strip()
         a_clean = answer.strip()
 
-        prompt_str = f"{q_clean}<|im_end|>\n<|im_start|>assistant\n"
+        # Disable thinking by injecting closed <think>\n\n</think>\n\n block right after assistant tag
+        prompt_str = f"{q_clean}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
         prompt_ids = self.tokenizer.encode(prompt_str, add_special_tokens=False)[:max_q_len]
 
         target_str = f"{a_clean}<|im_end|>\n"
@@ -664,7 +666,7 @@ def collate_task2_batch(items: List[Dict[str, Any]], pad_token_id: int) -> Dict[
             vis_mask = [1] * 196 if it["visual_feature"] is not None else [0] * 196
         else:
             vis_mask = []
-        mask = [1] * len(it["prefix_ids"]) + vis_mask + [1] * len(it["suffix_ids"]) + [0] * suf_pad
+        mask = [1] * len(it["prefix_ids"]) + [0] * pre_pad + vis_mask + [1] * len(it["suffix_ids"]) + [0] * suf_pad
 
         batch_pre.append(pre)
         batch_suf.append(suf)

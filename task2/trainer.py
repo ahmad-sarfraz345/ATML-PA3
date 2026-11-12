@@ -135,11 +135,15 @@ class Task2Trainer:
         # 1. Dev caption loss
         cap_items = []
         for c in dev_captions:
+            prompt_str = f"{c['question']}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            ans_str = f"{c['answer']}<|im_end|>\n"
+            p_ids = self.tokenizer.encode(prompt_str, add_special_tokens=False)
+            a_ids = self.tokenizer.encode(ans_str, add_special_tokens=False)
             ex = {
                 "image_id": c["image_id"],
                 "prefix_ids": self.tokenizer.encode("<|im_start|>user\n", add_special_tokens=False),
-                "suffix_ids": self.tokenizer.encode(f"{c['question']}<|im_end|>\n<|im_start|>assistant\n{c['answer']}<|im_end|>\n", add_special_tokens=False),
-                "labels": [-100] * len(self.tokenizer.encode(f"{c['question']}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False)) + self.tokenizer.encode(f"{c['answer']}<|im_end|>\n", add_special_tokens=False),
+                "suffix_ids": p_ids + a_ids,
+                "labels": [-100] * len(p_ids) + a_ids,
                 "visual_feature": cached_features.get(c["image_id"], None)
             }
             cap_items.append(ex)
@@ -152,9 +156,10 @@ class Task2Trainer:
                 batch_cap["attention_mask"].to(self.device),
                 batch_cap["visual_features"].to(self.device) if batch_cap["visual_features"] is not None else None
             )
-            # Example-weighted NLL
-            labels = batch_cap["labels"].to(self.device)[:, 1:].contiguous()
-            logits = outputs.logits[:, -labels.shape[1]:, :].contiguous()
+            # Exact causal LM alignment: logits predicting suffix are at [-(L_suf + 1) : -1]
+            labels = batch_cap["labels"].to(self.device).contiguous()
+            L_suf = labels.shape[1]
+            logits = outputs.logits[:, -(L_suf + 1) : -1, :].contiguous()
             loss_fct = nn.CrossEntropyLoss(reduction="none", ignore_index=-100)
             token_losses = loss_fct(logits.view(-1, logits.size(-1)), labels.view(-1)).view(labels.size())
             val_mask = (labels != -100)
@@ -178,41 +183,56 @@ class Task2Trainer:
                     img_corr = p[img_key]
                     img_part = p[partner_img_key]
 
-                    # Format base example
+                    # Format base example with thinking disabled
                     def make_ex(img_id):
+                        p_str = f"{q_text}<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
+                        a_str = f"{ans_text}<|im_end|>\n"
+                        p_ids = self.tokenizer.encode(p_str, add_special_tokens=False)
+                        a_ids = self.tokenizer.encode(a_str, add_special_tokens=False)
                         return {
                             "image_id": img_id,
                             "prefix_ids": self.tokenizer.encode("<|im_start|>user\n", add_special_tokens=False),
-                            "suffix_ids": self.tokenizer.encode(f"{q_text}<|im_end|>\n<|im_start|>assistant\n{ans_text}<|im_end|>\n", add_special_tokens=False),
-                            "labels": [-100] * len(self.tokenizer.encode(f"{q_text}<|im_end|>\n<|im_start|>assistant\n", add_special_tokens=False)) + self.tokenizer.encode(f"{ans_text}<|im_end|>\n", add_special_tokens=False),
+                            "suffix_ids": p_ids + a_ids,
+                            "labels": [-100] * len(p_ids) + a_ids,
                             "visual_feature": cached_features.get(img_id, None) if img_id is not None else None
                         }
+
+                    loss_fct = nn.CrossEntropyLoss(reduction="none", ignore_index=-100)
 
                     # Correct image
                     b_corr = collate_task2_batch([make_ex(img_corr)], pad_id)
                     with torch.no_grad():
                         out = self.vlm(b_corr["prefix_ids"].to(self.device), b_corr["suffix_ids"].to(self.device), b_corr["attention_mask"].to(self.device), b_corr["visual_features"].to(self.device) if b_corr["visual_features"] is not None else None)
-                        lab = b_corr["labels"].to(self.device)[:, 1:].contiguous()
-                        log = out.logits[:, -lab.shape[1]:, :].contiguous()
-                        l = nn.functional.cross_entropy(log.view(-1, log.size(-1)), lab.view(-1), ignore_index=-100).item()
+                        lab = b_corr["labels"].to(self.device).contiguous()
+                        L_s = lab.shape[1]
+                        log = out.logits[:, -(L_s + 1) : -1, :].contiguous()
+                        tok_l = loss_fct(log.view(-1, log.size(-1)), lab.view(-1)).view(lab.size())
+                        v_mask = (lab != -100)
+                        l = float((tok_l * v_mask).sum().item() / max(1, v_mask.sum().item()))
                         nll_correct_list.append(l)
 
                     # Partner image (complementary swap)
                     b_part = collate_task2_batch([make_ex(img_part)], pad_id)
                     with torch.no_grad():
                         out = self.vlm(b_part["prefix_ids"].to(self.device), b_part["suffix_ids"].to(self.device), b_part["attention_mask"].to(self.device), b_part["visual_features"].to(self.device) if b_part["visual_features"] is not None else None)
-                        lab = b_part["labels"].to(self.device)[:, 1:].contiguous()
-                        log = out.logits[:, -lab.shape[1]:, :].contiguous()
-                        l = nn.functional.cross_entropy(log.view(-1, log.size(-1)), lab.view(-1), ignore_index=-100).item()
+                        lab = b_part["labels"].to(self.device).contiguous()
+                        L_s = lab.shape[1]
+                        log = out.logits[:, -(L_s + 1) : -1, :].contiguous()
+                        tok_l = loss_fct(log.view(-1, log.size(-1)), lab.view(-1)).view(lab.size())
+                        v_mask = (lab != -100)
+                        l = float((tok_l * v_mask).sum().item() / max(1, v_mask.sum().item()))
                         nll_partner_list.append(l)
 
                     # No image
                     b_noimg = collate_task2_batch([make_ex(None)], pad_id)
                     with torch.no_grad():
                         out = self.vlm(b_noimg["prefix_ids"].to(self.device), b_noimg["suffix_ids"].to(self.device), b_noimg["attention_mask"].to(self.device), None)
-                        lab = b_noimg["labels"].to(self.device)[:, 1:].contiguous()
-                        log = out.logits[:, -lab.shape[1]:, :].contiguous()
-                        l = nn.functional.cross_entropy(log.view(-1, log.size(-1)), lab.view(-1), ignore_index=-100).item()
+                        lab = b_noimg["labels"].to(self.device).contiguous()
+                        L_s = lab.shape[1]
+                        log = out.logits[:, -(L_s + 1) : -1, :].contiguous()
+                        tok_l = loss_fct(log.view(-1, log.size(-1)), lab.view(-1)).view(lab.size())
+                        v_mask = (lab != -100)
+                        l = float((tok_l * v_mask).sum().item() / max(1, v_mask.sum().item()))
                         nll_noimg_list.append(l)
 
             mean_corr = float(sum(nll_correct_list) / max(1, len(nll_correct_list)))
@@ -246,7 +266,8 @@ class Task2Trainer:
         dev_captions: List[Dict[str, Any]],
         grounding_dev: List[Dict[str, Any]],
         vqa_dev: List[Dict[str, Any]],
-        cached_features: Dict[int, torch.Tensor]
+        cached_features: Dict[int, torch.Tensor],
+        force_train: bool = False
     ) -> Dict[str, Any]:
         """
         Executes the full 4,500 curriculum updates across 3 stages.
@@ -257,11 +278,11 @@ class Task2Trainer:
         training_logs = []
         dev_eval_logs = []
 
-        # Check if already completed
+        # Check if already completed (unless forced)
         final_ckpt = self.output_dir / "checkpoint_step_4500.pt"
         summary_file = self.output_dir / "train_summary.json"
-        if final_ckpt.exists() and summary_file.exists():
-            print(f"Task 2 is already completed. Skipping training.", flush=True)
+        if not force_train and final_ckpt.exists() and summary_file.exists():
+            print(f"Task 2 is already completed (found {final_ckpt}). Skipping training. Use force_train=True to retrain.", flush=True)
             return load_json(summary_file)
 
         # Evaluate step 0 before training
@@ -333,8 +354,10 @@ class Task2Trainer:
                             mb_batch["visual_features"].to(self.device) if mb_batch["visual_features"] is not None else None
                         )
 
-                        labels = mb_batch["labels"].to(self.device)[:, 1:].contiguous()
-                        logits = outputs.logits[:, -labels.shape[1]:, :].contiguous()
+                        # Exact causal LM alignment: logits predicting suffix are at [-(L_suf + 1) : -1]
+                        labels = mb_batch["labels"].to(self.device).contiguous()
+                        L_suf = labels.shape[1]
+                        logits = outputs.logits[:, -(L_suf + 1) : -1, :].contiguous()
 
                         # Example-weighted loss: average token loss within each example, then across batch
                         loss_fct = nn.CrossEntropyLoss(reduction="none", ignore_index=-100)

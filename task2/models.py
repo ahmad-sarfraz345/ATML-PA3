@@ -273,17 +273,33 @@ class QwenVLM(nn.Module):
         batch_size = inputs_embeds.shape[0]
         attention_mask = torch.ones(batch_size, inputs_embeds.shape[1], device=self.device, dtype=torch.long)
 
+        # Collect distinct termination tokens
+        stop_ids = set()
+        if self.tokenizer.eos_token_id is not None:
+            stop_ids.add(self.tokenizer.eos_token_id)
+        if self.tokenizer.pad_token_id is not None:
+            stop_ids.add(self.tokenizer.pad_token_id)
+        for tok in ["<|im_end|>", "<|endoftext|>"]:
+            t_id = self.tokenizer.convert_tokens_to_ids(tok)
+            if isinstance(t_id, int) and t_id >= 0:
+                stop_ids.add(t_id)
+
         outputs = self.qwen.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
             do_sample=False,  # Strict greedy decoding
             pad_token_id=self.tokenizer.pad_token_id,
-            eos_token_id=self.tokenizer.eos_token_id
+            eos_token_id=list(stop_ids)
         )
 
         decoded = []
         for seq in outputs:
             text = self.tokenizer.decode(seq, skip_special_tokens=True).strip()
+            # In case reasoning block was generated, strip it
+            if "</think>" in text:
+                text = text.split("</think>")[-1].strip()
+            elif "<think>" in text:
+                text = text.split("<think>")[-1].strip()
             decoded.append(text)
         return decoded

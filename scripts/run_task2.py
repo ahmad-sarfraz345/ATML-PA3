@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default="outputs/task2")
     parser.add_argument("--seed", type=int, default=6304)
     parser.add_argument("--spatial_pooling", action="store_true", help="Optional 49 visual tokens experiment")
+    parser.add_argument("--force_train", action="store_true", help="Force retraining even if final checkpoint exists")
     return parser.parse_args()
 
 def main():
@@ -145,7 +146,8 @@ def main():
             dev_captions=splits_data["dev_caps"],
             grounding_dev=splits_data["ground_dev"],
             vqa_dev=splits_data["vqa_dev"],
-            cached_features=cached_features
+            cached_features=cached_features,
+            force_train=args.force_train
         )
 
     # 4. Final Test Evaluations
