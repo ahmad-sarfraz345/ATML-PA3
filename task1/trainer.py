@@ -253,9 +253,12 @@ class Task1Trainer:
             print(f"Resuming checkpoint from {resume_from}...", flush=True)
             ckpt = torch.load(resume_from, map_location=self.device, weights_only=False)
             self.model.load_state_dict(ckpt["model_state_dict"])
-            self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
-            self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
-            self.scaler.load_state_dict(ckpt["scaler_state_dict"])
+            if "optimizer_state_dict" in ckpt and ckpt["optimizer_state_dict"] is not None:
+                self.optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            if "scheduler_state_dict" in ckpt and ckpt["scheduler_state_dict"] is not None:
+                self.scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            if "scaler_state_dict" in ckpt and ckpt["scaler_state_dict"] is not None:
+                self.scaler.load_state_dict(ckpt["scaler_state_dict"])
             current_step = ckpt["current_step"]
             examples_seen = ckpt["examples_seen"]
             training_logs = ckpt.get("training_logs", [])
@@ -409,26 +412,43 @@ class Task1Trainer:
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
 
-            # 6. Checkpointing schedule: 312, 625, 937, 1250
-            if current_step in self.checkpoint_steps:
+            # 6. Displacement computation & Checkpointing schedule: 312, 625, 937, 1250
+            if self.variant_name in ["full_ft", "full_ft_l2sp"] and current_step in [312, 625, 937, 1250]:
+                displacement = self.compute_full_model_displacement()
+                log_entry["model_displacement"] = displacement
+                print(f"[{self.variant_name}] Model displacement at step {current_step}: {displacement:.4f}")
+
+            # Save checkpoint to disk ONLY when required for downstream evaluation / diagnostics:
+            # - full_ft: step 625 (midpoint benchmark eval) and step 1250 (final benchmark eval & diagnostics)
+            # - full_ft_l2sp: step 1250 (final benchmark eval & diagnostics)
+            # - adapter variants: step 1250 (final benchmark eval & diagnostics)
+            save_disk = False
+            if self.variant_name == "full_ft" and current_step in [625, 1250]:
+                save_disk = True
+            elif self.variant_name != "full_ft" and current_step == 1250:
+                save_disk = True
+
+            if save_disk:
                 ckpt_path = self.output_dir / f"checkpoint_step_{current_step}.pt"
+                if self.variant_name in ["full_ft", "full_ft_l2sp"]:
+                    # Save FP16 weights ONLY (< 1.2 GB, zero optimizer states) to prevent Kaggle disk exhaustion
+                    state_to_save = {k: v.detach().to(dtype=torch.float16, device="cpu") for k, v in self.model.state_dict().items()}
+                else:
+                    state_to_save = {k: v.detach().cpu() for k, v in self.model.state_dict().items()}
+
                 ckpt_dict = {
                     "current_step": current_step,
                     "examples_seen": examples_seen,
-                    "model_state_dict": self.model.state_dict(),
-                    "optimizer_state_dict": self.optimizer.state_dict(),
-                    "scheduler_state_dict": self.scheduler.state_dict(),
-                    "scaler_state_dict": self.scaler.state_dict(),
+                    "model_state_dict": state_to_save,
                     "training_logs": training_logs,
                     "variant": self.variant_name
                 }
-                if self.variant_name in ["full_ft", "full_ft_l2sp"]:
-                    displacement = self.compute_full_model_displacement()
-                    ckpt_dict["model_displacement"] = displacement
-                    print(f"[{self.variant_name}] Model displacement at step {current_step}: {displacement:.4f}")
+                if "model_displacement" in log_entry:
+                    ckpt_dict["model_displacement"] = log_entry["model_displacement"]
 
                 torch.save(ckpt_dict, ckpt_path)
-                print(f"Saved checkpoint to {ckpt_path}")
+                size_mb = ckpt_path.stat().st_size / (1024 * 1024)
+                print(f"Saved lightweight checkpoint to {ckpt_path} ({size_mb:.2f} MB)")
 
         total_train_time = time.perf_counter() - start_time
         final_displacement = None
