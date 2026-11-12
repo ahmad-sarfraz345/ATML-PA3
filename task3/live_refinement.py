@@ -284,10 +284,7 @@ class LiveRefinementRunner:
             mean_out = float(np.mean([r["output_tokens"] for r in recs]))
             mean_time = float(np.mean([r["runtime_sec"] for r in recs]))
             hit_rate = float(np.mean([r["hit_max"] for r in recs])) * 100.0
-            def is_fail(r):
-                ans = r.get("extracted", r.get("selected_extracted", r.get("revised_extracted")))
-                return ans is None or ans == NO_ANSWER or not str(ans).strip()
-            fail_ext = float(np.mean([is_fail(r) for r in recs])) * 100.0
+            fail_ext = float(np.mean([r.get("extracted", r.get("selected_extracted", r.get("revised_extracted"))) is None for r in recs])) * 100.0
 
             summary["strategy_comparisons"][strat] = {
                 "accuracy_percent": round(acc, 2),
@@ -310,3 +307,4 @@ class LiveRefinementRunner:
         save_json(summary, results_file)
         print(f"Saved live refinement evaluation results to {results_file}")
         return summary
+

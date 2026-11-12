@@ -3,6 +3,7 @@ import os
 import sys
 import argparse
 from pathlib import Path
+import torch
 
 from common.utils import set_seed, get_device, save_json, load_json
 
@@ -32,58 +33,36 @@ def parse_args():
     return parser.parse_args()
 
 def ensure_data_downloaded(data_dir: Path, gdrive_folder_id: str):
-    """Downloads ATML-PA3-Data from Google Drive or links from Kaggle input if parquet files are missing."""
-    data_dir.mkdir(parents=True, exist_ok=True)
+    """Downloads ATML-PA3-Data from Google Drive if parquet files are missing."""
     math_gen = data_dir / "qwen25-math" / "generations.parquet"
     vista_gen = data_dir / "qwen25vl-mathvista" / "generations.parquet"
+
+    # Also check Kaggle input dataset location
+    kaggle_input = Path("/kaggle/input/atml-pa3-data")
+    if kaggle_input.exists():
+        print(f"Found Kaggle dataset at {kaggle_input}. Linking to {data_dir}...")
+        data_dir.mkdir(parents=True, exist_ok=True)
+        for sub in ["qwen25-math", "qwen25vl-mathvista", "README.MD"]:
+            src = kaggle_input / sub
+            dst = data_dir / sub
+            if src.exists() and not dst.exists():
+                if src.is_dir():
+                    import shutil
+                    shutil.copytree(src, dst)
+                else:
+                    import shutil
+                    shutil.copy2(src, dst)
 
     if math_gen.exists() and vista_gen.exists():
         print(f"ATML-PA3-Data already available at {data_dir}.")
         return
 
-    # Check potential Kaggle input paths
-    kaggle_input_base = Path("/kaggle/input")
-    if kaggle_input_base.exists():
-        print("Checking /kaggle/input for ATML-PA3-Data...")
-        for candidate in kaggle_input_base.rglob("generations.parquet"):
-            # candidate could be .../qwen25-math/generations.parquet
-            if candidate.parent.name == "qwen25-math":
-                dataset_root = candidate.parent.parent
-                print(f"Found ATML-PA3-Data root at {dataset_root}. Copying to {data_dir}...")
-                import shutil
-                for item in dataset_root.iterdir():
-                    dst = data_dir / item.name
-                    if not dst.exists():
-                        if item.is_dir():
-                            shutil.copytree(item, dst)
-                        else:
-                            shutil.copy2(item, dst)
-                break
-
-    if math_gen.exists() and vista_gen.exists():
-        print(f"ATML-PA3-Data successfully sourced from /kaggle/input to {data_dir}.")
-        return
-
-    # If still not found, download automatically from Google Drive via gdown
     print(f"Downloading ATML-PA3-Data from Google Drive folder {gdrive_folder_id}...")
     import gdown
+    data_dir.mkdir(parents=True, exist_ok=True)
     url = f"https://drive.google.com/drive/folders/{gdrive_folder_id}"
     gdown.download_folder(url=url, output=str(data_dir), quiet=False, use_cookies=False)
-
-    # In case gdown created a nested subfolder like data/task3/ATML-PA3-Data
-    nested = data_dir / "ATML-PA3-Data"
-    if nested.exists() and (nested / "qwen25-math").exists():
-        import shutil
-        print(f"Flattening nested directory {nested} into {data_dir}...")
-        for sub in nested.iterdir():
-            dst = data_dir / sub.name
-            if not dst.exists():
-                shutil.move(str(sub), str(dst))
-
-    if math_gen.exists() and vista_gen.exists():
-        print("Download completed successfully.")
-    else:
-        print("WARNING: Could not verify generations.parquet in both qwen25-math and qwen25vl-mathvista.")
+    print("Download completed.")
 
 def main():
     args = parse_args()
@@ -243,3 +222,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
