@@ -169,7 +169,7 @@ def main():
         conn_path = Path(args.output_dir) / "connector_stage_3.pt"
         lora_path = Path(args.output_dir) / "lora_stage_3.pt"
         if conn_path.exists():
-            vlm.connector.load_state_dict(torch.load(conn_path, map_location=device))
+            vlm.connector.load_state_dict(torch.load(conn_path, map_location=device, weights_only=False))
             print(f"Loaded trained connector from {conn_path}")
         else:
             ckpts = sorted(Path(args.output_dir).glob("checkpoint_step_*.pt"),
@@ -183,7 +183,7 @@ def main():
 
         if lora_path.exists():
             vlm.enable_lora()
-            vlm.qwen.load_state_dict(torch.load(lora_path, map_location=device), strict=False)
+            vlm.qwen.load_state_dict(torch.load(lora_path, map_location=device, weights_only=False), strict=False)
             print(f"Loaded trained LoRA from {lora_path}")
         else:
             ckpts = sorted(Path(args.output_dir).glob("checkpoint_step_*.pt"),
