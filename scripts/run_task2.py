@@ -169,10 +169,29 @@ def main():
         if conn_path.exists():
             vlm.connector.load_state_dict(torch.load(conn_path, map_location=device))
             print(f"Loaded trained connector from {conn_path}")
+        else:
+            ckpts = sorted(Path(args.output_dir).glob("checkpoint_step_*.pt"),
+                           key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0)
+            if ckpts:
+                print(f"Loading connector from latest checkpoint: {ckpts[-1]}", flush=True)
+                c_data = torch.load(ckpts[-1], map_location=device, weights_only=False)
+                vlm.connector.load_state_dict(c_data["connector_state"])
+            else:
+                print(f"WARNING: No trained connector found at {conn_path} or checkpoints!")
+
         if lora_path.exists():
             vlm.enable_lora()
-            vlm.lora_model.load_state_dict(torch.load(lora_path, map_location=device))
+            vlm.qwen.load_state_dict(torch.load(lora_path, map_location=device), strict=False)
             print(f"Loaded trained LoRA from {lora_path}")
+        else:
+            ckpts = sorted(Path(args.output_dir).glob("checkpoint_step_*.pt"),
+                           key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0)
+            if ckpts:
+                c_data = torch.load(ckpts[-1], map_location=device, weights_only=False)
+                if c_data.get("lora_state") is not None:
+                    vlm.enable_lora()
+                    vlm.qwen.load_state_dict(c_data["lora_state"], strict=False)
+                    print(f"Loaded trained LoRA from latest checkpoint: {ckpts[-1]}")
 
         run_final_test_evaluations(
             vlm=vlm,

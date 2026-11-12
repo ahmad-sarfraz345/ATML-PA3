@@ -273,6 +273,25 @@ class Task2Trainer:
         examples_seen = 0
         pad_id = self.tokenizer.pad_token_id
 
+        # Check if we can resume from existing checkpoint
+        existing_ckpts = sorted(
+            self.output_dir.glob("checkpoint_step_*.pt"),
+            key=lambda p: int(p.stem.split("_")[-1]) if p.stem.split("_")[-1].isdigit() else 0
+        )
+        if existing_ckpts:
+            latest_ckpt_path = existing_ckpts[-1]
+            latest_step = int(latest_ckpt_path.stem.split("_")[-1]) if latest_ckpt_path.stem.split("_")[-1].isdigit() else 0
+            if latest_step > 0 and latest_step < 4500:
+                print(f"Auto-resuming Task 2 from checkpoint {latest_ckpt_path} (step {latest_step})...", flush=True)
+                ckpt_data = torch.load(latest_ckpt_path, map_location=self.device, weights_only=False)
+                self.vlm.connector.load_state_dict(ckpt_data["connector_state"])
+                if ckpt_data.get("lora_state") is not None:
+                    self.vlm.enable_lora()
+                    self.vlm.qwen.load_state_dict(ckpt_data["lora_state"], strict=False)
+                current_step = latest_step
+                examples_seen = ckpt_data.get("examples_seen", latest_step * 16)
+                print(f"Successfully resumed at step {current_step} (examples seen: {examples_seen})!", flush=True)
+
         # Stages: 1, 2, 3
         for stage in [1, 2, 3]:
             print(f"\n=======================================================")
@@ -364,19 +383,21 @@ class Task2Trainer:
                 # Checkpoint check
                 if current_step in self.checkpoint_steps:
                     ckpt_p = self.output_dir / f"checkpoint_step_{current_step}.pt"
+                    lora_dict = {k: v.detach().cpu() for k, v in self.vlm.qwen.state_dict().items() if "lora_" in k} if self.vlm.lora_enabled else None
                     torch.save({
                         "step": current_step,
                         "stage": stage,
                         "examples_seen": examples_seen,
                         "connector_state": self.vlm.connector.state_dict(),
-                        "lora_state": self.vlm.lora_model.state_dict() if self.vlm.lora_enabled else None
+                        "lora_state": lora_dict
                     }, ckpt_p)
                     print(f"Saved checkpoint to {ckpt_p}")
 
             # Save stage endpoints connector & adapter weights
             torch.save(self.vlm.connector.state_dict(), self.output_dir / f"connector_stage_{stage}.pt")
             if self.vlm.lora_enabled:
-                torch.save(self.vlm.lora_model.state_dict(), self.output_dir / f"lora_stage_{stage}.pt")
+                lora_dict = {k: v.detach().cpu() for k, v in self.vlm.qwen.state_dict().items() if "lora_" in k}
+                torch.save(lora_dict, self.output_dir / f"lora_stage_{stage}.pt")
 
         total_time = time.perf_counter() - start_time
         summary = {

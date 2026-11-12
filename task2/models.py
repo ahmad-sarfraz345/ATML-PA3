@@ -4,7 +4,84 @@ from typing import Dict, Any, Optional, Tuple, List
 import torch
 import torch.nn as nn
 from transformers import AutoModel, AutoModelForCausalLM, AutoTokenizer
-from peft import LoraConfig, get_peft_model
+
+class LoRALinear(nn.Module):
+    """
+    Standard Low-Rank Adaptation (LoRA) layer wrapping a frozen linear base weight.
+    Effective weight: W = W0 + (alpha / r) * B * A
+    Zero dependency on external PEFT / torchao.
+    """
+    def __init__(
+        self,
+        base_layer: nn.Linear,
+        r: int = 16,
+        alpha: float = 32.0,
+        dropout: float = 0.05
+    ):
+        super().__init__()
+        self.base_layer = base_layer
+        self.in_features = base_layer.in_features
+        self.out_features = base_layer.out_features
+        self.r = r
+        self.alpha = alpha
+        self.scaling = alpha / r
+
+        # Freeze base layer
+        self.base_layer.weight.requires_grad = False
+        if self.base_layer.bias is not None:
+            self.base_layer.bias.requires_grad = False
+
+        # LoRA trainable matrices (FP32 master parameters for stability)
+        self.lora_A = nn.Parameter(torch.empty(r, self.in_features, dtype=torch.float32))
+        self.lora_B = nn.Parameter(torch.zeros(self.out_features, r, dtype=torch.float32))
+        self.lora_dropout = nn.Dropout(p=dropout) if dropout > 0.0 else nn.Identity()
+
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+        nn.init.zeros_(self.lora_B)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        orig_dtype = x.dtype
+        out = self.base_layer(x)
+        lora_in = self.lora_dropout(x).to(torch.float32)
+        lora_out = (lora_in @ self.lora_A.T) @ self.lora_B.T
+        out = out + (self.scaling * lora_out).to(orig_dtype)
+        return out
+
+    def get_delta_weight(self) -> torch.Tensor:
+        return self.scaling * (self.lora_B @ self.lora_A)
+
+    def merge_into_base(self):
+        delta = self.get_delta_weight().to(self.base_layer.weight.dtype)
+        self.base_layer.weight.data.add_(delta)
+
+def apply_lora_to_model(
+    model: nn.Module,
+    r: int = 16,
+    alpha: float = 32.0,
+    dropout: float = 0.05,
+    target_modules: Optional[List[str]] = None
+) -> Dict[str, LoRALinear]:
+    if target_modules is None:
+        target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+
+    for p in model.parameters():
+        p.requires_grad = False
+
+    replaced = {}
+    for name, module in model.named_modules():
+        for target in target_modules:
+            if hasattr(module, target):
+                sub_layer = getattr(module, target)
+                if isinstance(sub_layer, nn.Linear):
+                    lora_layer = LoRALinear(sub_layer, r=r, alpha=alpha, dropout=dropout).to(
+                        device=next(sub_layer.parameters()).device
+                    )
+                    setattr(module, target, lora_layer)
+                    replaced[f"{name}.{target}"] = lora_layer
+    return replaced
 
 class VisualConnector(nn.Module):
     """
@@ -122,23 +199,25 @@ class QwenVLM(nn.Module):
         ).to(self.device, dtype=torch.float32)
 
         self.lora_enabled = False
-        self.lora_model = None
+        self.lora_layers = {}
+
+    @property
+    def lora_model(self):
+        return self.qwen
 
     def enable_lora(self, r: int = 16, alpha: float = 32.0, dropout: float = 0.05):
-        """Enables LoRA adapters on q_proj, k_proj, v_proj, o_proj for Stages 2 and 3."""
+        """Enables native LoRA adapters on q_proj, k_proj, v_proj, o_proj for Stages 2 and 3."""
         if not self.lora_enabled:
-            print(f"Enabling LoRA adapters on Qwen (r={r}, alpha={alpha}, dropout={dropout})...")
-            lora_config = LoraConfig(
+            print(f"Enabling native LoRA adapters on Qwen (r={r}, alpha={alpha}, dropout={dropout})...")
+            self.lora_layers = apply_lora_to_model(
+                self.qwen,
                 r=r,
-                lora_alpha=alpha,
-                lora_dropout=dropout,
-                target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-                bias="none",
-                task_type="CAUSAL_LM"
+                alpha=alpha,
+                dropout=dropout,
+                target_modules=["q_proj", "k_proj", "v_proj", "o_proj"]
             )
-            self.lora_model = get_peft_model(self.qwen, lora_config)
             self.lora_enabled = True
-            print("LoRA successfully attached.")
+            print(f"LoRA successfully attached ({len(self.lora_layers)} layers).")
 
     def get_trainable_parameters(self) -> Tuple[int, int]:
         """Returns (trainable_params, total_params)."""
@@ -156,8 +235,7 @@ class QwenVLM(nn.Module):
         Assembles inputs_embeds: [prefix_embeds, visual_embeds, suffix_embeds]
         If visual_features is None (no-image condition): [prefix_embeds, suffix_embeds]
         """
-        qwen_active = self.lora_model if self.lora_enabled else self.qwen
-        embed_tokens = qwen_active.get_input_embeddings()
+        embed_tokens = self.qwen.get_input_embeddings()
 
         prefix_embeds = embed_tokens(prefix_ids)  # (B, L_pre, 1024)
         suffix_embeds = embed_tokens(suffix_ids)  # (B, L_suf, 1024)
@@ -177,8 +255,7 @@ class QwenVLM(nn.Module):
     ):
         """Forward pass through Qwen returning logits or hidden states."""
         inputs_embeds = self.assemble_multimodal_embeddings(prefix_ids, suffix_ids, visual_features)
-        qwen_active = self.lora_model if self.lora_enabled else self.qwen
-        return qwen_active(inputs_embeds=inputs_embeds, attention_mask=attention_mask, use_cache=False)
+        return self.qwen(inputs_embeds=inputs_embeds, attention_mask=attention_mask, use_cache=False)
 
     @torch.no_grad()
     def generate_answer(
@@ -192,12 +269,11 @@ class QwenVLM(nn.Module):
         Greedy decoding (temperature 0, max 16 new tokens, thinking disabled).
         """
         self.eval()
-        qwen_active = self.lora_model if self.lora_enabled else self.qwen
         inputs_embeds = self.assemble_multimodal_embeddings(prefix_ids, suffix_ids, visual_features)
         batch_size = inputs_embeds.shape[0]
         attention_mask = torch.ones(batch_size, inputs_embeds.shape[1], device=self.device, dtype=torch.long)
 
-        outputs = qwen_active.generate(
+        outputs = self.qwen.generate(
             inputs_embeds=inputs_embeds,
             attention_mask=attention_mask,
             max_new_tokens=max_new_tokens,
