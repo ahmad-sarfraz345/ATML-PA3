@@ -7,7 +7,12 @@ os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import random
 import time
 import json
-import torch
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    HAS_TORCH = False
 import numpy as np
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Tuple
@@ -19,28 +24,32 @@ def set_seed(seed: int = 6304):
     """
     random.seed(seed)
     np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if HAS_TORCH and torch is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
     os.environ["PYTHONHASHSEED"] = str(seed)
 
-def get_device() -> torch.device:
+def get_device() -> Any:
     """Returns CUDA device if available, else CPU."""
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if HAS_TORCH and torch is not None:
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return "cpu"
 
 class GPUMemoryTracker:
     """Tracks peak GPU memory usage in MB / GB."""
-    def __init__(self, device: Optional[torch.device] = None):
+    def __init__(self, device: Optional[Any] = None):
         self.device = device or get_device()
         self.reset()
 
     def reset(self):
-        if torch.cuda.is_available():
+        if HAS_TORCH and torch is not None and torch.cuda.is_available():
             torch.cuda.reset_peak_memory_stats(self.device)
 
     def get_peak_memory_mb(self) -> float:
-        if torch.cuda.is_available():
+        if HAS_TORCH and torch is not None and torch.cuda.is_available():
             return torch.cuda.max_memory_allocated(self.device) / (1024 * 1024)
         return 0.0
 
