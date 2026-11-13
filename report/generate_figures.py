@@ -38,7 +38,7 @@ def plot_figure_1():
         "oplora_16": ("OPLoRA-16 (k=128)", "#9467bd", "-.")
     }
     
-    fig, ax = plt.subplots(figsize=(6.5, 2.5), dpi=300)
+    fig, ax = plt.subplots(figsize=(6.5, 2.4), dpi=300)
     
     for var, (label, color, ls) in variants.items():
         log_file = Path(f"outputs/task1/{var}/training_logs.json")
@@ -46,23 +46,25 @@ def plot_figure_1():
             data = load_json(log_file)
             steps = [d["step"] for d in data]
             losses = [d["sft_loss"] for d in data]
-            window = 10
+            window = 15
             smoothed = np.convolve(losses, np.ones(window)/window, mode='valid')
             smooth_steps = steps[window-1:]
-            ax.plot(smooth_steps, smoothed, label=label, color=color, linestyle=ls, linewidth=1.8)
-            ax.plot(steps, losses, color=color, alpha=0.15, linewidth=0.7)
+            ax.plot(smooth_steps, smoothed, label=label, color=color, linestyle=ls, linewidth=1.6)
+            ax.plot(steps, losses, color=color, alpha=0.08, linewidth=0.5)
 
     for ckpt in [312, 625, 937, 1250]:
-        ax.axvline(x=ckpt, color="gray", linestyle=":", alpha=0.6)
-        if ckpt == 312:
-            ax.text(ckpt + 8, 2.25, "Checkpoint", color="dimgray", fontsize=8.5, rotation=90)
+        ax.axvline(x=ckpt, color="gray", linestyle=":", alpha=0.55, linewidth=1.0)
 
-    ax.set_xlabel("Optimizer Updates (Batch Size 32, 40,000 Total Examples)")
-    ax.set_ylabel("SFT Cross-Entropy Loss")
-    ax.set_title("MetaMathQA SFT Training Trajectories Across Adaptation Regimes")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="upper right", framealpha=0.95, fontsize=8.2)
-    ax.set_ylim(0.45, 2.4)
+    ax.text(312 + 10, 0.95, "Checkpoint 1 (312)", color="dimgray", fontsize=7.5)
+    ax.text(625 + 10, 0.95, "Checkpoint 2 (625)", color="dimgray", fontsize=7.5)
+
+    ax.set_xlabel("Optimizer Updates (Batch Size 32, 40,000 Total Examples)", fontsize=9.0)
+    ax.set_ylabel("SFT Cross-Entropy Loss", fontsize=9.0)
+    ax.set_title("MetaMathQA SFT Training Trajectories Across Adaptation Regimes", fontsize=9.5)
+    ax.grid(True, linestyle=":", alpha=0.5)
+    ax.legend(loc="upper right", framealpha=0.95, fontsize=8.0)
+    ax.set_ylim(0.12, 1.08)
+    ax.set_xlim(0, 1270)
     
     fig.savefig(OUTPUT_DIR / "fig1_task1_learning_curves.pdf", bbox_inches="tight")
     fig.savefig(OUTPUT_DIR / "fig1_task1_learning_curves.png", bbox_inches="tight")
@@ -280,70 +282,72 @@ def plot_figure_5():
     v_data = load_json(vista_file)
     budgets = [1, 2, 4, 8, 16, 32]
     
-    fig, axes = plt.subplots(2, 2, figsize=(8.0, 3.0), dpi=300)
+    fig, axes = plt.subplots(2, 2, figsize=(7.6, 3.2), dpi=300)
+    plt.subplots_adjust(top=0.81, hspace=0.38, wspace=0.26)
     
     # Subplot (0, 0): MATH Accuracy vs N
     ax = axes[0, 0]
-    ax.plot(budgets, [m_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], label="Oracle Coverage", color="black", linestyle="--", marker="x", markersize=3, linewidth=1.4)
-    ax.plot(budgets, [m_data["method_results"]["SelfCertainty-RWC"][str(N)]["accuracy_percent"] for N in budgets], label="SelfCertainty-RWC", color="#d62728", marker="s", markersize=3, linewidth=1.5)
-    ax.plot(budgets, [m_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], label="Self-Consistency", color="#1f77b4", marker="o", markersize=3, linewidth=1.4)
-    ax.plot(budgets, [m_data["method_results"]["Highest-SelfCertainty"][str(N)]["accuracy_percent"] for N in budgets], label=r"Highest-Certainty", color="#ff7f0e", marker="^", markersize=3, linewidth=1.3)
-    ax.plot(budgets, [m_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], label=r"Highest-LogProb", color="#2ca02c", marker="v", markersize=3, linewidth=1.3)
-    ax.plot(budgets, [m_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], label="FirstAns Baseline", color="gray", linestyle=":", linewidth=1.2)
+    l_oracle, = ax.plot(budgets, [m_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3, label="Oracle Coverage")
+    l_rwc, = ax.plot(budgets, [m_data["method_results"]["SelfCertainty-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4, label="Quality-RWC (Ours)")
+    l_sc, = ax.plot(budgets, [m_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3, label="Self-Consistency")
+    l_high, = ax.plot(budgets, [m_data["method_results"]["Highest-SelfCertainty"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2, label="Highest-Quality")
+    l_lp, = ax.plot(budgets, [m_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2, label="Highest-LogProb")
+    l_base, = ax.plot(budgets, [m_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2, label="FirstAns Baseline")
     
     ax.set_xscale("log", base=2)
     ax.set_xticks(budgets)
-    ax.set_xticklabels([str(b) for b in budgets])
-    ax.set_ylabel("MATH Acc (%)")
-    ax.set_title("(a) MATH: Accuracy vs. Budget ($N$)")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="lower right", fontsize=7.2, framealpha=0.95)
+    ax.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
+    ax.set_ylabel("MATH Acc (%)", fontsize=8.5)
+    ax.set_title("(a) MATH: Accuracy vs. Budget ($N$)", fontsize=9.0)
+    ax.grid(True, linestyle=":", alpha=0.5)
     ax.set_ylim(58, 92)
     
     # Subplot (0, 1): MATH Accuracy vs Token Cost
     ax = axes[0, 1]
-    for m, col, mk, lbl in [("SelfCertainty-RWC", "#d62728", "s", "SelfCertainty-RWC"), ("Self-Consistency", "#1f77b4", "o", "Self-Consistency"), ("Highest-LogProb", "#2ca02c", "v", "Highest-LogProb")]:
+    for m, col, mk in [("SelfCertainty-RWC", "#d62728", "s"), ("Self-Consistency", "#1f77b4", "o"), ("Highest-LogProb", "#2ca02c", "v")]:
         costs = [m_data["method_results"][m][str(N)]["mean_token_cost"] for N in budgets]
         accs = [m_data["method_results"][m][str(N)]["accuracy_percent"] for N in budgets]
-        ax.plot(costs, accs, label=lbl, color=col, marker=mk, markersize=3, linewidth=1.4)
-    ax.set_ylabel("MATH Acc (%)")
-    ax.set_xlabel("Mean Generated Output Tokens")
-    ax.set_title("(b) MATH: Accuracy vs. Token Cost")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="lower right", fontsize=7.5, framealpha=0.95)
+        ax.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
+    ax.set_ylabel("MATH Acc (%)", fontsize=8.5)
+    ax.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
+    ax.set_title("(b) MATH: Accuracy vs. Token Cost", fontsize=9.0)
+    ax.grid(True, linestyle=":", alpha=0.5)
     ax.set_ylim(58, 75)
     
     # Subplot (1, 0): MathVista Accuracy vs N
     ax = axes[1, 0]
-    ax.plot(budgets, [v_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], label="Oracle Coverage", color="black", linestyle="--", marker="x", markersize=3, linewidth=1.4)
-    ax.plot(budgets, [v_data["method_results"]["VisConf-RWC"][str(N)]["accuracy_percent"] for N in budgets], label=r"VisConf-RWC", color="#d62728", marker="s", markersize=3, linewidth=1.5)
-    ax.plot(budgets, [v_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], label="Self-Consistency", color="#1f77b4", marker="o", markersize=3, linewidth=1.4)
-    ax.plot(budgets, [v_data["method_results"]["VisConf-Highest"][str(N)]["accuracy_percent"] for N in budgets], label=r"VisConf-Highest", color="#9467bd", marker="^", markersize=3, linewidth=1.3)
-    ax.plot(budgets, [v_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], label=r"Highest-LogProb", color="#2ca02c", marker="v", markersize=3, linewidth=1.3)
-    ax.plot(budgets, [v_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], label="FirstAns Baseline", color="gray", linestyle=":", linewidth=1.2)
+    ax.plot(budgets, [v_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3)
+    ax.plot(budgets, [v_data["method_results"]["VisConf-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4)
+    ax.plot(budgets, [v_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3)
+    ax.plot(budgets, [v_data["method_results"]["VisConf-Highest"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2)
+    ax.plot(budgets, [v_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2)
+    ax.plot(budgets, [v_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2)
     
     ax.set_xscale("log", base=2)
     ax.set_xticks(budgets)
-    ax.set_xticklabels([str(b) for b in budgets])
-    ax.set_xlabel("Candidate Budget ($N$)")
-    ax.set_ylabel("MathVista Acc (%)")
-    ax.set_title("(c) MathVista: Accuracy vs. Budget ($N$)")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="lower right", fontsize=7.2, framealpha=0.95)
+    ax.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
+    ax.set_xlabel("Candidate Budget ($N$)", fontsize=8.5)
+    ax.set_ylabel("MathVista Acc (%)", fontsize=8.5)
+    ax.set_title("(c) MathVista: Accuracy vs. Budget ($N$)", fontsize=9.0)
+    ax.grid(True, linestyle=":", alpha=0.5)
     ax.set_ylim(46, 92)
     
     # Subplot (1, 1): MathVista Accuracy vs Token Cost
     ax = axes[1, 1]
-    for m, col, mk, lbl in [("VisConf-RWC", "#d62728", "s", "VisConf-RWC"), ("Self-Consistency", "#1f77b4", "o", "Self-Consistency"), ("Highest-LogProb", "#2ca02c", "v", "Highest-LogProb")]:
+    for m, col, mk in [("VisConf-RWC", "#d62728", "s"), ("Self-Consistency", "#1f77b4", "o"), ("Highest-LogProb", "#2ca02c", "v")]:
         costs = [v_data["method_results"][m][str(N)]["mean_token_cost"] for N in budgets]
         accs = [v_data["method_results"][m][str(N)]["accuracy_percent"] for N in budgets]
-        ax.plot(costs, accs, label=lbl, color=col, marker=mk, markersize=3, linewidth=1.4)
-    ax.set_ylabel("MathVista Acc (%)")
-    ax.set_xlabel("Mean Generated Output Tokens")
-    ax.set_title("(d) MathVista: Accuracy vs. Token Cost")
-    ax.grid(True, linestyle=":", alpha=0.6)
-    ax.legend(loc="lower right", fontsize=7.5, framealpha=0.95)
+        ax.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
+    ax.set_ylabel("MathVista Acc (%)", fontsize=8.5)
+    ax.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
+    ax.set_title("(d) MathVista: Accuracy vs. Token Cost", fontsize=9.0)
+    ax.grid(True, linestyle=":", alpha=0.5)
     ax.set_ylim(46, 67)
+    
+    # Unified Legend at the top
+    handles = [l_oracle, l_rwc, l_sc, l_high, l_lp, l_base]
+    labels = ["Oracle Coverage", "Quality-RWC (Ours)", "Self-Consistency", "Highest-Quality", "Highest-LogProb", "FirstAns Baseline"]
+    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.99), ncol=3, frameon=True, facecolor="white", edgecolor="lightgray", framealpha=0.95, fontsize=7.8)
     
     fig.savefig(OUTPUT_DIR / "fig5_task3_scaling_curves.pdf", bbox_inches="tight")
     fig.savefig(OUTPUT_DIR / "fig5_task3_scaling_curves.png", bbox_inches="tight")
