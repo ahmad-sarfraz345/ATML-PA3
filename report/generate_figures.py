@@ -397,7 +397,7 @@ def plot_figure_6():
     ax1.set_ylabel("Proportion of Questions (%)")
     ax1.set_title("(a) MATH: Failure Decomposition (SC)")
     ax1.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax1.legend(loc="upper right", fontsize=7.5, framealpha=0.95)
+    ax1.legend(loc="lower right", fontsize=7.5, framealpha=0.95, facecolor="white", edgecolor="lightgray")
     ax1.set_ylim(0, 100)
     
     # MathVista
@@ -415,7 +415,7 @@ def plot_figure_6():
     ax2.set_ylabel("Proportion of Questions (%)")
     ax2.set_title("(b) MathVista: Failure Decomposition (SC)")
     ax2.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax2.legend(loc="upper right", fontsize=7.5, framealpha=0.95)
+    ax2.legend(loc="lower right", fontsize=7.5, framealpha=0.95, facecolor="white", edgecolor="lightgray")
     ax2.set_ylim(0, 100)
     
     fig.savefig(OUTPUT_DIR / "fig6_task3_failure_decomposition.pdf", bbox_inches="tight")
