@@ -180,7 +180,7 @@ def plot_figure_3():
     ax1.set_ylabel("Loss / NLL")
     ax1.set_title("(a) Curriculum SFT Loss & Dev NLL")
     ax1.grid(True, linestyle=":", alpha=0.6)
-    ax1.legend(loc="upper right", framealpha=0.95, fontsize=8.0)
+    ax1.legend(loc="lower left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax1.set_ylim(0.0, 9.5)
     
     # Subplot 2: Development Image-Swap Penalty Delta NLL
@@ -195,7 +195,7 @@ def plot_figure_3():
     ax2.set_ylabel(r"Swap Penalty $\Delta\mathrm{NLL}$")
     ax2.set_title(r"(b) Dev Image-Swap Penalty $\Delta\mathrm{NLL}$")
     ax2.grid(True, linestyle=":", alpha=0.6)
-    ax2.legend(loc="upper left", framealpha=0.95, fontsize=8.0)
+    ax2.legend(loc="lower right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax2.set_ylim(-0.2, 0.55)
     
     fig.savefig(OUTPUT_DIR / "fig3_task2_curriculum_curves.pdf", bbox_inches="tight")
@@ -239,7 +239,7 @@ def plot_figure_4():
     ax1.set_ylabel("Evaluation Accuracy (%)")
     ax1.set_title("(a) Accuracy Under Visual Controls")
     ax1.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax1.legend(loc="upper right", framealpha=0.95, fontsize=8.0)
+    ax1.legend(loc="lower left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax1.set_ylim(0, 80)
     
     # Subplot 2: Reference Canonical NLL with 95% Bootstrap CIs
@@ -259,7 +259,7 @@ def plot_figure_4():
     ax2.set_ylabel("Target Reference NLL")
     ax2.set_title("(b) Target NLL Across Visual Controls")
     ax2.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax2.legend(loc="upper left", framealpha=0.95, fontsize=8.0)
+    ax2.legend(loc="lower right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax2.set_ylim(0, 5.5)
     
     fig.savefig(OUTPUT_DIR / "fig4_task2_grounding_eval.pdf", bbox_inches="tight")
