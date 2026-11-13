@@ -4,6 +4,14 @@ import json
 import time
 import math
 import numpy as np
+try:
+    import torch
+    import torch.nn as nn
+    HAS_TORCH = True
+except ImportError:
+    torch = None
+    nn = None
+    HAS_TORCH = False
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
