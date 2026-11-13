@@ -180,7 +180,7 @@ def plot_figure_3():
     ax1.set_ylabel("Loss / NLL")
     ax1.set_title("(a) Curriculum SFT Loss & Dev NLL")
     ax1.grid(True, linestyle=":", alpha=0.6)
-    ax1.legend(loc="lower left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
+    ax1.legend(loc="upper right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax1.set_ylim(0.0, 9.5)
     
     # Subplot 2: Development Image-Swap Penalty Delta NLL
@@ -195,7 +195,7 @@ def plot_figure_3():
     ax2.set_ylabel(r"Swap Penalty $\Delta\mathrm{NLL}$")
     ax2.set_title(r"(b) Dev Image-Swap Penalty $\Delta\mathrm{NLL}$")
     ax2.grid(True, linestyle=":", alpha=0.6)
-    ax2.legend(loc="lower right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
+    ax2.legend(loc="upper left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax2.set_ylim(-0.2, 0.55)
     
     fig.savefig(OUTPUT_DIR / "fig3_task2_curriculum_curves.pdf", bbox_inches="tight")
@@ -239,7 +239,7 @@ def plot_figure_4():
     ax1.set_ylabel("Evaluation Accuracy (%)")
     ax1.set_title("(a) Accuracy Under Visual Controls")
     ax1.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax1.legend(loc="lower left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
+    ax1.legend(loc="upper right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax1.set_ylim(0, 80)
     
     # Subplot 2: Reference Canonical NLL with 95% Bootstrap CIs
@@ -259,7 +259,7 @@ def plot_figure_4():
     ax2.set_ylabel("Target Reference NLL")
     ax2.set_title("(b) Target NLL Across Visual Controls")
     ax2.grid(True, linestyle=":", alpha=0.6, axis="y")
-    ax2.legend(loc="lower right", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
+    ax2.legend(loc="upper left", framealpha=0.95, fontsize=8.0, facecolor="white", edgecolor="lightgray")
     ax2.set_ylim(0, 5.5)
     
     fig.savefig(OUTPUT_DIR / "fig4_task2_grounding_eval.pdf", bbox_inches="tight")
@@ -274,6 +274,7 @@ def plot_figure_5():
     print("Generating Figure 5: Task 3 Test-Time Scaling Curves...")
     prev_autolayout = plt.rcParams.get("figure.autolayout", False)
     plt.rcParams["figure.autolayout"] = False
+    
     math_file = Path("outputs/task3/offline_math_results.json")
     vista_file = Path("outputs/task3/offline_mathvista_results.json")
     
@@ -285,8 +286,8 @@ def plot_figure_5():
     v_data = load_json(vista_file)
     budgets = [1, 2, 4, 8, 16, 32]
     
-    fig = plt.figure(figsize=(7.6, 3.6), dpi=300)
-    gs = gridspec.GridSpec(3, 2, height_ratios=[0.45, 1.0, 1.0], hspace=0.48, wspace=0.26)
+    fig = plt.figure(figsize=(7.6, 4.3), dpi=300)
+    gs = gridspec.GridSpec(3, 2, height_ratios=[0.36, 1.0, 1.0], hspace=1.05, wspace=0.28)
     
     # Dedicated axis for the unified top legend
     ax_leg = fig.add_subplot(gs[0, :])
@@ -316,7 +317,6 @@ def plot_figure_5():
         accs = [m_data["method_results"][m][str(N)]["accuracy_percent"] for N in budgets]
         ax_b.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
     ax_b.set_ylabel("MATH Acc (%)", fontsize=8.5)
-    ax_b.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
     ax_b.set_title("(b) MATH: Accuracy vs. Token Cost", fontsize=9.0)
     ax_b.grid(True, linestyle=":", alpha=0.5)
     ax_b.set_ylim(58, 75)
