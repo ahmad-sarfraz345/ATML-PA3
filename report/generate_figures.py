@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 
 # Publication styling calibrated for NeurIPS 10pt layout
 plt.rcParams.update({
@@ -271,6 +272,8 @@ def plot_figure_4():
 # ==============================================================================
 def plot_figure_5():
     print("Generating Figure 5: Task 3 Test-Time Scaling Curves...")
+    prev_autolayout = plt.rcParams.get("figure.autolayout", False)
+    plt.rcParams["figure.autolayout"] = False
     math_file = Path("outputs/task3/offline_math_results.json")
     vista_file = Path("outputs/task3/offline_mathvista_results.json")
     
@@ -282,76 +285,81 @@ def plot_figure_5():
     v_data = load_json(vista_file)
     budgets = [1, 2, 4, 8, 16, 32]
     
-    fig, axes = plt.subplots(2, 2, figsize=(7.6, 3.2), dpi=300)
-    plt.subplots_adjust(top=0.81, hspace=0.38, wspace=0.26)
+    fig = plt.figure(figsize=(7.6, 3.6), dpi=300)
+    gs = gridspec.GridSpec(3, 2, height_ratios=[0.45, 1.0, 1.0], hspace=0.48, wspace=0.26)
+    
+    # Dedicated axis for the unified top legend
+    ax_leg = fig.add_subplot(gs[0, :])
+    ax_leg.axis('off')
     
     # Subplot (0, 0): MATH Accuracy vs N
-    ax = axes[0, 0]
-    l_oracle, = ax.plot(budgets, [m_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3, label="Oracle Coverage")
-    l_rwc, = ax.plot(budgets, [m_data["method_results"]["SelfCertainty-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4, label="Quality-RWC (Ours)")
-    l_sc, = ax.plot(budgets, [m_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3, label="Self-Consistency")
-    l_high, = ax.plot(budgets, [m_data["method_results"]["Highest-SelfCertainty"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2, label="Highest-Quality")
-    l_lp, = ax.plot(budgets, [m_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2, label="Highest-LogProb")
-    l_base, = ax.plot(budgets, [m_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2, label="FirstAns Baseline")
+    ax_a = fig.add_subplot(gs[1, 0])
+    l_oracle, = ax_a.plot(budgets, [m_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3, label="Oracle Coverage")
+    l_rwc, = ax_a.plot(budgets, [m_data["method_results"]["SelfCertainty-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4, label="Quality-RWC (Ours)")
+    l_sc, = ax_a.plot(budgets, [m_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3, label="Self-Consistency")
+    l_high, = ax_a.plot(budgets, [m_data["method_results"]["Highest-SelfCertainty"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2, label="Highest-Quality")
+    l_lp, = ax_a.plot(budgets, [m_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2, label="Highest-LogProb")
+    l_base, = ax_a.plot(budgets, [m_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2, label="FirstAns Baseline")
     
-    ax.set_xscale("log", base=2)
-    ax.set_xticks(budgets)
-    ax.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
-    ax.set_ylabel("MATH Acc (%)", fontsize=8.5)
-    ax.set_title("(a) MATH: Accuracy vs. Budget ($N$)", fontsize=9.0)
-    ax.grid(True, linestyle=":", alpha=0.5)
-    ax.set_ylim(58, 92)
+    ax_a.set_xscale("log", base=2)
+    ax_a.set_xticks(budgets)
+    ax_a.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
+    ax_a.set_ylabel("MATH Acc (%)", fontsize=8.5)
+    ax_a.set_title(r"(a) MATH: Accuracy vs. Budget ($N$)", fontsize=9.0)
+    ax_a.grid(True, linestyle=":", alpha=0.5)
+    ax_a.set_ylim(58, 92)
     
     # Subplot (0, 1): MATH Accuracy vs Token Cost
-    ax = axes[0, 1]
+    ax_b = fig.add_subplot(gs[1, 1])
     for m, col, mk in [("SelfCertainty-RWC", "#d62728", "s"), ("Self-Consistency", "#1f77b4", "o"), ("Highest-LogProb", "#2ca02c", "v")]:
         costs = [m_data["method_results"][m][str(N)]["mean_token_cost"] for N in budgets]
         accs = [m_data["method_results"][m][str(N)]["accuracy_percent"] for N in budgets]
-        ax.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
-    ax.set_ylabel("MATH Acc (%)", fontsize=8.5)
-    ax.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
-    ax.set_title("(b) MATH: Accuracy vs. Token Cost", fontsize=9.0)
-    ax.grid(True, linestyle=":", alpha=0.5)
-    ax.set_ylim(58, 75)
+        ax_b.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
+    ax_b.set_ylabel("MATH Acc (%)", fontsize=8.5)
+    ax_b.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
+    ax_b.set_title("(b) MATH: Accuracy vs. Token Cost", fontsize=9.0)
+    ax_b.grid(True, linestyle=":", alpha=0.5)
+    ax_b.set_ylim(58, 75)
     
     # Subplot (1, 0): MathVista Accuracy vs N
-    ax = axes[1, 0]
-    ax.plot(budgets, [v_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3)
-    ax.plot(budgets, [v_data["method_results"]["VisConf-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4)
-    ax.plot(budgets, [v_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3)
-    ax.plot(budgets, [v_data["method_results"]["VisConf-Highest"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2)
-    ax.plot(budgets, [v_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2)
-    ax.plot(budgets, [v_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2)
+    ax_c = fig.add_subplot(gs[2, 0])
+    ax_c.plot(budgets, [v_data["oracle_coverage"][str(N)]["mean_percent"] for N in budgets], color="black", linestyle="--", marker="x", markersize=3.5, linewidth=1.3)
+    ax_c.plot(budgets, [v_data["method_results"]["VisConf-RWC"][str(N)]["accuracy_percent"] for N in budgets], color="#d62728", marker="s", markersize=3.5, linewidth=1.4)
+    ax_c.plot(budgets, [v_data["method_results"]["Self-Consistency"][str(N)]["accuracy_percent"] for N in budgets], color="#1f77b4", marker="o", markersize=3.5, linewidth=1.3)
+    ax_c.plot(budgets, [v_data["method_results"]["VisConf-Highest"][str(N)]["accuracy_percent"] for N in budgets], color="#ff7f0e", marker="^", markersize=3.5, linewidth=1.2)
+    ax_c.plot(budgets, [v_data["method_results"]["Highest-LogProb"][str(N)]["accuracy_percent"] for N in budgets], color="#2ca02c", marker="v", markersize=3.5, linewidth=1.2)
+    ax_c.plot(budgets, [v_data["method_results"]["FirstAns"][str(N)]["accuracy_percent"] for N in budgets], color="gray", linestyle=":", linewidth=1.2)
     
-    ax.set_xscale("log", base=2)
-    ax.set_xticks(budgets)
-    ax.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
-    ax.set_xlabel("Candidate Budget ($N$)", fontsize=8.5)
-    ax.set_ylabel("MathVista Acc (%)", fontsize=8.5)
-    ax.set_title("(c) MathVista: Accuracy vs. Budget ($N$)", fontsize=9.0)
-    ax.grid(True, linestyle=":", alpha=0.5)
-    ax.set_ylim(46, 92)
+    ax_c.set_xscale("log", base=2)
+    ax_c.set_xticks(budgets)
+    ax_c.set_xticklabels([str(b) for b in budgets], fontsize=8.0)
+    ax_c.set_xlabel(r"Candidate Budget ($N$)", fontsize=8.5)
+    ax_c.set_ylabel("MathVista Acc (%)", fontsize=8.5)
+    ax_c.set_title(r"(c) MathVista: Accuracy vs. Budget ($N$)", fontsize=9.0)
+    ax_c.grid(True, linestyle=":", alpha=0.5)
+    ax_c.set_ylim(46, 92)
     
     # Subplot (1, 1): MathVista Accuracy vs Token Cost
-    ax = axes[1, 1]
+    ax_d = fig.add_subplot(gs[2, 1])
     for m, col, mk in [("VisConf-RWC", "#d62728", "s"), ("Self-Consistency", "#1f77b4", "o"), ("Highest-LogProb", "#2ca02c", "v")]:
         costs = [v_data["method_results"][m][str(N)]["mean_token_cost"] for N in budgets]
         accs = [v_data["method_results"][m][str(N)]["accuracy_percent"] for N in budgets]
-        ax.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
-    ax.set_ylabel("MathVista Acc (%)", fontsize=8.5)
-    ax.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
-    ax.set_title("(d) MathVista: Accuracy vs. Token Cost", fontsize=9.0)
-    ax.grid(True, linestyle=":", alpha=0.5)
-    ax.set_ylim(46, 67)
+        ax_d.plot(costs, accs, color=col, marker=mk, markersize=3.5, linewidth=1.3)
+    ax_d.set_ylabel("MathVista Acc (%)", fontsize=8.5)
+    ax_d.set_xlabel("Mean Generated Output Tokens", fontsize=8.5)
+    ax_d.set_title("(d) MathVista: Accuracy vs. Token Cost", fontsize=9.0)
+    ax_d.grid(True, linestyle=":", alpha=0.5)
+    ax_d.set_ylim(46, 67)
     
-    # Unified Legend at the top
+    # Unified Legend in ax_leg
     handles = [l_oracle, l_rwc, l_sc, l_high, l_lp, l_base]
     labels = ["Oracle Coverage", "Quality-RWC (Ours)", "Self-Consistency", "Highest-Quality", "Highest-LogProb", "FirstAns Baseline"]
-    fig.legend(handles, labels, loc="upper center", bbox_to_anchor=(0.5, 0.99), ncol=3, frameon=True, facecolor="white", edgecolor="lightgray", framealpha=0.95, fontsize=7.8)
+    ax_leg.legend(handles, labels, loc="center", ncol=3, frameon=True, facecolor="white", edgecolor="lightgray", framealpha=0.95, fontsize=7.8)
     
     fig.savefig(OUTPUT_DIR / "fig5_task3_scaling_curves.pdf", bbox_inches="tight")
     fig.savefig(OUTPUT_DIR / "fig5_task3_scaling_curves.png", bbox_inches="tight")
     plt.close(fig)
+    plt.rcParams["figure.autolayout"] = prev_autolayout
     print("Saved Figure 5.")
 
 # ==============================================================================
