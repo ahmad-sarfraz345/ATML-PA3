@@ -162,7 +162,7 @@ On the standardized 42-response qualitative probe set (Appendix~\ref{app:qualita
 \label{sec:task2}
 
 \subsection{VLM Architecture and Curriculum Alignment}
-We construct a vision-language model integrating a frozen SigLIP vision encoder (\texttt{SigLIP-base-patch16-224}) with \texttt{Qwen3-0.6B} via a two-layer MLP connector $g_\phi$ formulated in Equation~\eqref{eq:vlm_connector}:
+We construct a vision-language model integrating a frozen SigLIP vision encoder (SigLIP-base-patch16-224) with Qwen3-0.6B via a two-layer MLP connector $g_\phi$ formulated in Equation~\eqref{eq:vlm_connector}:
 \begin{equation}
     Z(I) = g_\phi(F(I)) = W_2 \, \mathrm{GELU}(W_1 F(I) + b_1) + b_2,
     \label{eq:vlm_connector}
